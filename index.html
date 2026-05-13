@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sprite Sheets Maker</title>
+    <link rel="stylesheet" href="src/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>Sprite Sheets Maker</h1>
+            <p>Convert local animated media into packed sprite sheets and metadata.</p>
+          </div>
+          <div class="status-pill" id="codecStatus">Checking codecs...</div>
+        </header>
+
+        <nav class="tool-tabs" aria-label="Tools">
+          <button class="tab-button active" type="button" data-page-target="converter">Sprite Sheet Converter</button>
+          <button class="tab-button" type="button" data-page-target="background">Background Remover</button>
+        </nav>
+
+        <section class="tool-page active" id="converterPage" data-page="converter">
+        <div class="layout">
+          <aside class="controls">
+            <label class="drop-zone" id="dropZone">
+              <input id="fileInput" type="file" multiple accept="video/*,image/gif,image/webp,image/png,.apng,.avi,.mkv,.mov,.mp4,.webm,.gif,.giv,.webp">
+              <span class="drop-title">Choose or drop media</span>
+              <span class="drop-meta" id="fileMeta">Single media or multiple ordered image frames</span>
+            </label>
+
+            <div class="control-group">
+              <h2>Frames</h2>
+              <label class="check-row">
+                <input id="useSourceFps" type="checkbox">
+                <span>Use source frame rate</span>
+              </label>
+              <label id="sampleFpsField">
+                <span>Video sample FPS</span>
+                <input id="sampleFps" type="number" min="1" max="120" step="1" value="24">
+              </label>
+              <label class="check-row">
+                <input id="useSourceFrameCount" type="checkbox">
+                <span>Use source frame count</span>
+              </label>
+              <label id="maxFramesField">
+                <span>Max frames</span>
+                <input id="maxFrames" type="number" min="1" max="2000" step="1" value="300">
+              </label>
+              <label class="check-row">
+                <input id="removeDuplicates" type="checkbox" checked>
+                <span>Remove duplicate frames</span>
+              </label>
+              <label id="duplicateThresholdField">
+                <span>Duplicate threshold (%)</span>
+                <input id="duplicateThreshold" type="number" min="0" max="100" step="0.1" value="3.1">
+              </label>
+            </div>
+
+            <div class="control-group">
+              <h2>Frame Size</h2>
+              <label>
+                <span>Mode</span>
+                <select id="sizeMode">
+                  <option value="source">Source size</option>
+                  <option value="custom">Custom size</option>
+                  <option value="multiplier">Source multiplied</option>
+                </select>
+              </label>
+              <div class="split" id="customSizeFields">
+                <label>
+                  <span>Width</span>
+                  <input id="frameWidth" type="number" min="1" value="32">
+                </label>
+                <label>
+                  <span>Height</span>
+                  <input id="frameHeight" type="number" min="1" value="32">
+                </label>
+              </div>
+              <label id="multiplierField">
+                <span>Multiplier</span>
+                <input id="multiplier" type="number" min="1" max="16" step="1" value="4">
+              </label>
+              <label id="fitModeField">
+                <span>Fit</span>
+                <select id="fitMode">
+                  <option value="contain">Contain</option>
+                  <option value="cover">Cover</option>
+                  <option value="stretch">Stretch</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="control-group">
+              <h2>Sheet</h2>
+              <label>
+                <span>Columns</span>
+                <input id="columns" type="number" min="0" value="0">
+              </label>
+              <label>
+                <span>Padding</span>
+                <input id="padding" type="number" min="0" value="2">
+              </label>
+              <div class="split">
+                <label>
+                  <span>Pivot X</span>
+                  <input id="pivotX" type="number" min="0" max="1" step="0.01" value="0.5">
+                </label>
+                <label>
+                  <span>Pivot Y</span>
+                  <input id="pivotY" type="number" min="0" max="1" step="0.01" value="0.5">
+                </label>
+              </div>
+              <label>
+                <span>Metadata</span>
+                <select id="metadataFormat">
+                  <option value="json">JSON</option>
+                  <option value="xml">XML</option>
+                  <option value="csv">CSV</option>
+                </select>
+              </label>
+            </div>
+
+            <button class="primary" id="convertBtn" type="button" disabled>Convert</button>
+            <div class="progress" id="progress">Load a file to begin.</div>
+          </aside>
+
+          <section class="preview-panel">
+            <div class="preview-header">
+              <h2>Preview</h2>
+              <div class="actions">
+                <button id="downloadPng" type="button" disabled>PNG</button>
+                <button id="downloadMeta" type="button" disabled>Metadata</button>
+              </div>
+            </div>
+            <div class="canvas-stage">
+              <canvas id="sheetCanvas"></canvas>
+              <div class="empty-state" id="emptyState">Sprite sheet preview appears here.</div>
+            </div>
+            <div class="summary" id="summary"></div>
+          </section>
+        </div>
+        </section>
+
+        <section class="tool-page" id="backgroundPage" data-page="background">
+          <div class="layout">
+            <aside class="controls">
+              <label class="drop-zone" id="backgroundDropZone">
+                <input id="backgroundFileInput" type="file" multiple accept="video/*,image/gif,image/webp,image/png,.apng,.avi,.mkv,.mov,.mp4,.webm,.gif,.giv,.webp">
+                <span class="drop-title">Choose or drop media</span>
+                <span class="drop-meta" id="backgroundFileMeta">Single media or multiple ordered image frames</span>
+              </label>
+
+              <div class="control-group">
+                <h2>Background Removal</h2>
+                <label>
+                  <span>Background removal</span>
+                  <select id="backgroundMode">
+                    <option value="none">None</option>
+                    <option value="chroma">Chroma key color</option>
+                    <option value="corner">Use top-left pixel</option>
+                  </select>
+                </label>
+                <label id="keyColorField">
+                  <span>Key color</span>
+                  <input id="keyColor" type="color" value="#00ff00">
+                </label>
+                <label id="keyToleranceField">
+                  <span>Tolerance (%)</span>
+                  <input id="keyTolerance" type="number" min="0" max="100" step="0.1" value="9.5">
+                </label>
+                <label id="alphaNoiseField">
+                  <span>Alpha noise cleanup (%)</span>
+                  <input id="alphaNoise" type="number" min="0" max="100" step="0.1" value="1">
+                </label>
+                <label id="matteRefineField">
+                  <span>Matte refinement</span>
+                  <select id="matteRefine">
+                    <option value="pixel">Pixel art edge cleanup</option>
+                    <option value="none">None</option>
+                    <option value="soft">Small soft edge</option>
+                    <option value="tight">Tighten 1 px</option>
+                  </select>
+                </label>
+                <label class="check-row" id="despillField">
+                  <input id="despillEdges" type="checkbox" checked>
+                  <span>Despill edge color</span>
+                </label>
+                <label class="check-row" id="transparentRgbField">
+                  <input id="cleanTransparentRgb" type="checkbox" checked>
+                  <span>Clean transparent RGB</span>
+                </label>
+                <label class="check-row" id="edgeExtrusionField">
+                  <input id="edgeExtrusion" type="checkbox" checked>
+                  <span>Extrude edge colors</span>
+                </label>
+                <label>
+                  <span>Crop</span>
+                  <select id="cropMode">
+                    <option value="none">None</option>
+                    <option value="global">Global transparent bounds</option>
+                    <option value="perFrame">Per-frame transparent bounds</option>
+                  </select>
+                </label>
+              </div>
+            </aside>
+
+            <section class="preview-panel">
+              <div class="preview-header">
+                <h2>Background Preview</h2>
+                <div class="actions">
+                  <button id="downloadBgPreview" type="button" disabled>PNG</button>
+                </div>
+              </div>
+              <div class="source-preview-stage large">
+                <canvas id="sourceFramePreview" hidden></canvas>
+                <div class="empty-state" id="sourcePreviewEmpty">Load media to preview the first processed frame.</div>
+              </div>
+              <div class="summary" id="sourcePreviewMeta"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="src/app.js"></script>
+  </body>
+</html>
