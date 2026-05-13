@@ -163,6 +163,14 @@ select {
   pointer-events: none;
 }
 
+.hidden-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .drop-title {
   font-weight: 750;
 }
@@ -315,6 +323,10 @@ button:disabled {
   background: var(--accent-strong);
 }
 
+.full-width {
+  width: 100%;
+}
+
 .progress {
   min-height: 42px;
   color: var(--muted);
@@ -366,7 +378,8 @@ button:disabled {
   background-size: 20px 20px;
 }
 
-#sheetCanvas {
+#sheetCanvas,
+#pixelCanvas {
   display: none;
   max-width: 100%;
   height: auto;
@@ -390,6 +403,11 @@ button:disabled {
 
 .summary strong {
   color: var(--text);
+}
+
+.preview-action {
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
 }
 
 .warning {

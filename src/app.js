@@ -58,22 +58,54 @@ const ui = {
   summary: $("summary"),
   downloadPng: $("downloadPng"),
   downloadMeta: $("downloadMeta"),
-  downloadBgPreview: $("downloadBgPreview")
+  downloadBgPreview: $("downloadBgPreview"),
+  pixelDropZone: $("pixelDropZone"),
+  pixelFileInput: $("pixelFileInput"),
+  pixelFolderInput: $("pixelFolderInput"),
+  pixelFolderBtn: $("pixelFolderBtn"),
+  pixelFileMeta: $("pixelFileMeta"),
+  pixelWidth: $("pixelWidth"),
+  pixelHeight: $("pixelHeight"),
+  pixelUpscale: $("pixelUpscale"),
+  pixelPaletteMode: $("pixelPaletteMode"),
+  pixelPaletteSizeField: $("pixelPaletteSizeField"),
+  pixelPaletteSize: $("pixelPaletteSize"),
+  pixelRetraceStrength: $("pixelRetraceStrength"),
+  pixelEdgeStrength: $("pixelEdgeStrength"),
+  pixelCleanupPasses: $("pixelCleanupPasses"),
+  pixelOutlineStrength: $("pixelOutlineStrength"),
+  pixelAlphaThreshold: $("pixelAlphaThreshold"),
+  pixelDitherMode: $("pixelDitherMode"),
+  pixelDitherStrength: $("pixelDitherStrength"),
+  pixelColumns: $("pixelColumns"),
+  pixelPadding: $("pixelPadding"),
+  pixelConvertBtn: $("pixelConvertBtn"),
+  pixelProgress: $("pixelProgress"),
+  pixelCanvas: $("pixelCanvas"),
+  pixelEmptyState: $("pixelEmptyState"),
+  pixelSummary: $("pixelSummary"),
+  downloadPixelPng: $("downloadPixelPng")
 };
 
 const state = {
   file: null,
   files: [],
+  pixelFiles: [],
   outputName: "spritesheet",
   previewTimer: null,
   previewRun: 0,
   backgroundPreviewBlobUrl: null,
+  pixelBlobUrl: null,
   sheetBlobUrl: null,
   metadataBlobUrl: null
 };
 
 function setProgress(message, isWarning = false) {
   ui.progress.innerHTML = isWarning ? `<span class="warning">${message}</span>` : message;
+}
+
+function setPixelProgress(message, isWarning = false) {
+  ui.pixelProgress.innerHTML = isWarning ? `<span class="warning">${message}</span>` : message;
 }
 
 function switchPage(page) {
@@ -97,6 +129,10 @@ function syncFrameSizeControls() {
   ui.fitModeField.hidden = ui.sizeMode.value !== "custom";
 }
 
+function syncPixelControls() {
+  ui.pixelPaletteSizeField.hidden = !["retrace", "adaptive", "kmeans"].includes(ui.pixelPaletteMode.value);
+}
+
 function syncTransparencyControls() {
   const enabled = ui.backgroundMode.value !== "none";
   ui.keyColorField.hidden = ui.backgroundMode.value !== "chroma";
@@ -111,6 +147,7 @@ function syncTransparencyControls() {
 function syncConditionalControls() {
   syncFrameControls();
   syncFrameSizeControls();
+  syncPixelControls();
   syncTransparencyControls();
 }
 
@@ -142,6 +179,25 @@ function getSettings() {
     pivotX: clampNumber(ui.pivotX.value, 0, 1, 0.5),
     pivotY: clampNumber(ui.pivotY.value, 0, 1, 0.5),
     metadataFormat: ui.metadataFormat.value
+  };
+}
+
+function getPixelSettings() {
+  return {
+    width: clampNumber(ui.pixelWidth.value, 4, 512, 64),
+    height: clampNumber(ui.pixelHeight.value, 4, 512, 64),
+    upscale: clampNumber(ui.pixelUpscale.value, 1, 12, 4),
+    paletteMode: ui.pixelPaletteMode.value,
+    paletteSize: Math.round(clampNumber(ui.pixelPaletteSize.value, 16, 128, 24)),
+    retraceStrength: clampNumber(ui.pixelRetraceStrength.value, 0, 100, 82) / 100,
+    edgeStrength: clampNumber(ui.pixelEdgeStrength.value, 0, 100, 85) / 100,
+    cleanupPasses: Math.round(clampNumber(ui.pixelCleanupPasses.value, 0, 4, 3)),
+    outlineStrength: clampNumber(ui.pixelOutlineStrength.value, 0, 100, 70) / 100,
+    alphaThreshold: percentToByteThreshold(ui.pixelAlphaThreshold.value, 1),
+    ditherMode: ui.pixelDitherMode.value,
+    ditherStrength: clampNumber(ui.pixelDitherStrength.value, 0, 100, 35) / 100,
+    columns: Math.round(clampNumber(ui.pixelColumns.value, 0, 256, 0)),
+    padding: Math.round(clampNumber(ui.pixelPadding.value, 0, 64, 2))
   };
 }
 
@@ -248,6 +304,24 @@ function onFiles(fileList) {
 
 function onFile(file) {
   onFiles(file ? [file] : []);
+}
+
+function onPixelFiles(fileList) {
+  const files = Array.from(fileList || [])
+    .filter((file) => mediaKind(file) === "image")
+    .sort(naturalCompareNames);
+
+  if (!files.length) {
+    setPixelProgress("Pixel Art Converter accepts image files only.", true);
+    return;
+  }
+
+  state.pixelFiles = files;
+  state.outputName = files.length > 1 ? baseName(files[0].name).replace(/[_\-\s]?\d+$/, "") || "pixel_sequence" : baseName(files[0].name);
+  ui.pixelFileMeta.textContent = describeFiles(files);
+  ui.pixelConvertBtn.disabled = false;
+  ui.pixelSummary.textContent = "";
+  setPixelProgress("Ready to convert.");
 }
 
 function scheduleFirstFramePreview() {
@@ -1254,6 +1328,899 @@ function drawFrameWithOptionalExtrusion(ctx, canvas, x, y, extrusion) {
   ctx.drawImage(canvas, width - 1, height - 1, 1, 1, x + width, y + height, extrusion, extrusion);
 }
 
+async function convertPixelArt() {
+  if (!state.pixelFiles.length) return;
+
+  const settings = getPixelSettings();
+  revokePixelOutput();
+  ui.pixelConvertBtn.disabled = true;
+
+  try {
+    setPixelProgress("Converting images...");
+    const canvases = [];
+    for (let index = 0; index < state.pixelFiles.length; index += 1) {
+      const decoded = await decodeFirstImageFrame(state.pixelFiles[index]);
+      canvases.push(processPixelArtCanvas(decoded.frame.canvas, settings));
+      if (index % 8 === 0) setPixelProgress(`Converted ${index + 1} image${index === 0 ? "" : "s"}...`);
+    }
+
+    const output = canvases.length === 1 ? canvases[0] : packPixelCanvases(canvases, settings);
+    drawPixelOutput(output);
+    preparePixelDownload(output);
+    ui.pixelSummary.innerHTML = [
+      `<strong>${canvases.length}</strong> frame${canvases.length === 1 ? "" : "s"} converted.`,
+      `Output: <strong>${output.width}x${output.height}</strong>.`,
+      `Palette: ${["retrace", "adaptive", "kmeans"].includes(settings.paletteMode) ? `${settings.paletteSize} ${settings.paletteMode} colors` : settings.paletteMode}.`
+    ].join(" ");
+    setPixelProgress("Done.");
+  } catch (error) {
+    console.error(error);
+    setPixelProgress(error.message || "Pixel conversion failed.", true);
+  } finally {
+    ui.pixelConvertBtn.disabled = false;
+  }
+}
+
+function processPixelArtCanvas(sourceCanvas, settings) {
+  const sourceCtx = sourceCanvas.getContext("2d");
+  const source = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+  const sourceEdges = computeEdgeMap(source.data, source.width, source.height);
+  const preprocessed = edgeAwarePreprocess(source.data, source.width, source.height, sourceEdges);
+  const reduced = edgeAwareDownsample(preprocessed, source.width, source.height, settings.width, settings.height, sourceEdges, settings.edgeStrength);
+  removeLowAlphaNoise(reduced.data, settings.alphaThreshold);
+
+  const traced = retracePixelForms(reduced, settings);
+  const reducedEdges = computeEdgeMap(traced.data, traced.width, traced.height);
+  const palette = buildPixelPalette(traced.data, settings);
+  const quantized = quantizePixelData(traced, palette, settings, reducedEdges);
+  if (settings.paletteMode === "retrace") {
+    celShadeRetracedPixels(quantized.data, quantized.width, quantized.height, settings, reducedEdges);
+  }
+  cleanupPixelClusters(quantized.data, quantized.width, quantized.height, settings.cleanupPasses, reducedEdges, settings.alphaThreshold);
+  mergeTinyColorIslands(quantized.data, quantized.width, quantized.height, Math.max(2, settings.cleanupPasses + 2 + Math.round(settings.retraceStrength * 3)), reducedEdges, settings.alphaThreshold);
+  reinforcePixelOutlines(quantized.data, quantized.width, quantized.height, settings.outlineStrength, settings.alphaThreshold, reducedEdges);
+  if (settings.paletteMode === "retrace") {
+    tracePixelSilhouette(quantized.data, quantized.width, quantized.height, settings, reducedEdges);
+  }
+  removeLowAlphaNoise(quantized.data, settings.alphaThreshold);
+  bleedForegroundRgbIntoTransparentEdges(quantized.data, quantized.width, quantized.height, {
+    rewriteSemiTransparent: true,
+    fillFullyTransparent: true,
+    fullCanvasExtrusion: false
+  });
+
+  return upscaleImageDataNearest(quantized, settings.upscale);
+}
+
+function computeEdgeMap(data, width, height) {
+  const luminance = new Float32Array(width * height);
+  const edges = new Float32Array(width * height);
+  let maxEdge = 0;
+
+  for (let pixel = 0; pixel < luminance.length; pixel += 1) {
+    const index = pixel * 4;
+    luminance[pixel] = (0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2]) * (data[index + 3] / 255);
+  }
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixel = y * width + x;
+      const gx = -luminance[pixel - width - 1] - 2 * luminance[pixel - 1] - luminance[pixel + width - 1]
+        + luminance[pixel - width + 1] + 2 * luminance[pixel + 1] + luminance[pixel + width + 1];
+      const gy = -luminance[pixel - width - 1] - 2 * luminance[pixel - width] - luminance[pixel - width + 1]
+        + luminance[pixel + width - 1] + 2 * luminance[pixel + width] + luminance[pixel + width + 1];
+      const edge = Math.hypot(gx, gy);
+      edges[pixel] = edge;
+      maxEdge = Math.max(maxEdge, edge);
+    }
+  }
+
+  if (maxEdge > 0) {
+    for (let index = 0; index < edges.length; index += 1) {
+      edges[index] = Math.min(1, edges[index] / maxEdge);
+    }
+  }
+
+  return edges;
+}
+
+function edgeAwarePreprocess(data, width, height, edgeMap) {
+  const output = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixel = y * width + x;
+      if (edgeMap[pixel] > 0.32) continue;
+
+      const center = pixel * 4;
+      let r = data[center];
+      let g = data[center + 1];
+      let b = data[center + 2];
+      let a = data[center + 3];
+      let count = 1;
+
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const next = ((y + oy) * width + x + ox) * 4;
+          const distance = Math.hypot(data[next] - data[center], data[next + 1] - data[center + 1], data[next + 2] - data[center + 2]);
+          if (distance > 42) continue;
+          r += data[next];
+          g += data[next + 1];
+          b += data[next + 2];
+          a += data[next + 3];
+          count += 1;
+        }
+      }
+
+      output[center] = Math.round(r / count);
+      output[center + 1] = Math.round(g / count);
+      output[center + 2] = Math.round(b / count);
+      output[center + 3] = Math.round(a / count);
+    }
+  }
+  reinforcePreprocessEdges(output, data, width, height, edgeMap);
+  return output;
+}
+
+function reinforcePreprocessEdges(output, source, width, height, edgeMap) {
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixel = y * width + x;
+      if (edgeMap[pixel] < 0.38) continue;
+      const index = pixel * 4;
+      const currentLum = luminance(source[index], source[index + 1], source[index + 2]);
+      let neighborLum = 0;
+      let count = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const next = ((y + oy) * width + x + ox) * 4;
+          neighborLum += luminance(source[next], source[next + 1], source[next + 2]);
+          count += 1;
+        }
+      }
+      if (currentLum < neighborLum / count) {
+        output[index] = Math.round(source[index] * 0.86);
+        output[index + 1] = Math.round(source[index + 1] * 0.86);
+        output[index + 2] = Math.round(source[index + 2] * 0.86);
+      }
+    }
+  }
+}
+
+function edgeAwareDownsample(data, sourceWidth, sourceHeight, targetWidth, targetHeight, edgeMap, edgeStrength) {
+  const output = new ImageData(targetWidth, targetHeight);
+  const target = output.data;
+
+  for (let y = 0; y < targetHeight; y += 1) {
+    const y0 = Math.floor(y * sourceHeight / targetHeight);
+    const y1 = Math.max(y0 + 1, Math.ceil((y + 1) * sourceHeight / targetHeight));
+    for (let x = 0; x < targetWidth; x += 1) {
+      const x0 = Math.floor(x * sourceWidth / targetWidth);
+      const x1 = Math.max(x0 + 1, Math.ceil((x + 1) * sourceWidth / targetWidth));
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let alphaWeighted = 0;
+      let colorWeight = 0;
+      let alphaWeight = 0;
+      let edgeMax = 0;
+      const samples = [];
+
+      for (let sy = y0; sy < y1; sy += 1) {
+        for (let sx = x0; sx < x1; sx += 1) {
+          const sourcePixel = sy * sourceWidth + sx;
+          const index = sourcePixel * 4;
+          const alpha = data[index + 3] / 255;
+          const edge = edgeMap[sourcePixel];
+          edgeMax = Math.max(edgeMax, edge);
+          const edgeWeight = 1 + edge * edgeStrength * 5;
+          const weight = Math.max(0.04, alpha) * edgeWeight;
+          r += data[index] * weight;
+          g += data[index + 1] * weight;
+          b += data[index + 2] * weight;
+          colorWeight += weight;
+          alphaWeighted += data[index + 3] * edgeWeight;
+          alphaWeight += edgeWeight;
+          if (data[index + 3] > 0) {
+            samples.push({
+              r: data[index],
+              g: data[index + 1],
+              b: data[index + 2],
+              a: data[index + 3],
+              edge,
+              weight
+            });
+          }
+        }
+      }
+
+      const targetIndex = (y * targetWidth + x) * 4;
+      const average = [r / colorWeight, g / colorWeight, b / colorWeight];
+      const representative = chooseBlockRepresentative(samples, average, edgeMax, edgeStrength);
+      target[targetIndex] = representative.r;
+      target[targetIndex + 1] = representative.g;
+      target[targetIndex + 2] = representative.b;
+      target[targetIndex + 3] = Math.round(alphaWeighted / alphaWeight);
+    }
+  }
+
+  return output;
+}
+
+function chooseBlockRepresentative(samples, average, edgeMax, edgeStrength) {
+  if (!samples.length) return { r: 0, g: 0, b: 0 };
+
+  let best = samples[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const sample of samples) {
+    const distance = colorDistanceRgb(sample.r, sample.g, sample.b, average[0], average[1], average[2]);
+    const alphaBias = (255 - sample.a) * 2;
+    const edgeBonus = edgeMax > 0.22 ? sample.edge * edgeStrength * 9000 : 0;
+    const score = distance + alphaBias - edgeBonus;
+    if (score < bestScore) {
+      best = sample;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function retracePixelForms(imageData, settings) {
+  const strength = settings.retraceStrength || 0;
+  const output = new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
+  if (strength <= 0) return output;
+
+  const hueSteps = Math.round(48 - strength * 24);
+  const saturationSteps = Math.round(6 - strength * 2);
+  const lightnessSteps = Math.round(7 - strength * 3);
+  const alphaHarden = Math.min(0.72, strength * 0.62);
+
+  for (let index = 0; index < output.data.length; index += 4) {
+    const alpha = output.data[index + 3];
+    if (alpha <= settings.alphaThreshold) {
+      output.data[index + 3] = 0;
+      continue;
+    }
+
+    const hsl = rgbToHsl(output.data[index], output.data[index + 1], output.data[index + 2]);
+    const hue = Math.round(hsl.h * hueSteps) / hueSteps;
+    const saturation = Math.round(hsl.s * saturationSteps) / saturationSteps;
+    const lightness = Math.round(hsl.l * lightnessSteps) / lightnessSteps;
+    const rgb = hslToRgb(hue, saturation, lightness);
+
+    output.data[index] = rgb[0];
+    output.data[index + 1] = rgb[1];
+    output.data[index + 2] = rgb[2];
+    output.data[index + 3] = Math.round(alpha * (1 - alphaHarden) + (alpha >= 128 ? 255 : 0) * alphaHarden);
+  }
+
+  return output;
+}
+
+function buildPixelPalette(data, settings) {
+  const fixed = fixedPalette(settings.paletteMode);
+  if (fixed) return fixed;
+
+  const pixels = [];
+  for (let index = 0; index < data.length; index += 4) {
+    if (data[index + 3] <= settings.alphaThreshold) continue;
+    pixels.push([data[index], data[index + 1], data[index + 2]]);
+  }
+
+  if (!pixels.length) return [[0, 0, 0]];
+  if (settings.paletteMode === "retrace") {
+    return retracePalette(pixels, settings.paletteSize);
+  }
+  if (settings.paletteMode === "kmeans") {
+    return kMeansPalette(pixels, settings.paletteSize);
+  }
+  return medianCutPalette(pixels, settings.paletteSize);
+}
+
+function fixedPalette(mode) {
+  const palettes = {
+    pico8: [[0, 0, 0], [29, 43, 83], [126, 37, 83], [0, 135, 81], [171, 82, 54], [95, 87, 79], [194, 195, 199], [255, 241, 232], [255, 0, 77], [255, 163, 0], [255, 236, 39], [0, 228, 54], [41, 173, 255], [131, 118, 156], [255, 119, 168], [255, 204, 170]],
+    gameboy: [[15, 56, 15], [48, 98, 48], [139, 172, 15], [155, 188, 15]],
+    nes: [[124, 124, 124], [0, 0, 252], [0, 0, 188], [68, 40, 188], [148, 0, 132], [168, 0, 32], [168, 16, 0], [136, 20, 0], [80, 48, 0], [0, 120, 0], [0, 104, 0], [0, 88, 0], [0, 64, 88], [0, 0, 0], [188, 188, 188], [248, 248, 248]],
+    grayscale: [[0, 0, 0], [48, 48, 48], [96, 96, 96], [144, 144, 144], [192, 192, 192], [240, 240, 240]]
+  };
+  return palettes[mode] || null;
+}
+
+function medianCutPalette(pixels, size) {
+  let boxes = [{ pixels }];
+  while (boxes.length < size) {
+    boxes.sort((a, b) => colorBoxRange(b.pixels) - colorBoxRange(a.pixels));
+    const box = boxes.shift();
+    if (!box || box.pixels.length <= 1) {
+      if (box) boxes.push(box);
+      break;
+    }
+    const channel = widestChannel(box.pixels);
+    box.pixels.sort((a, b) => a[channel] - b[channel]);
+    const middle = Math.floor(box.pixels.length / 2);
+    boxes.push({ pixels: box.pixels.slice(0, middle) }, { pixels: box.pixels.slice(middle) });
+  }
+  return boxes.map((box) => averageColor(box.pixels));
+}
+
+function retracePalette(pixels, size) {
+  const groups = new Map();
+  for (const pixel of pixels) {
+    const hsl = rgbToHsl(pixel[0], pixel[1], pixel[2]);
+    const hueGroup = hsl.s < 0.12 ? "gray" : Math.floor(hsl.h * 14);
+    const saturationGroup = Math.floor(hsl.s * 4);
+    const lightnessGroup = Math.floor(hsl.l * 6);
+    const key = `${hueGroup}:${saturationGroup}:${lightnessGroup}`;
+    const group = groups.get(key) || { r: 0, g: 0, b: 0, count: 0, lightness: 0 };
+    group.r += pixel[0];
+    group.g += pixel[1];
+    group.b += pixel[2];
+    group.lightness += hsl.l;
+    group.count += 1;
+    groups.set(key, group);
+  }
+
+  const palette = [...groups.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, size)
+    .map((group) => [
+      Math.round(group.r / group.count),
+      Math.round(group.g / group.count),
+      Math.round(group.b / group.count)
+    ]);
+
+  if (palette.length < size && palette.length > 0) {
+    const darkest = [...palette].sort((a, b) => luminance(a[0], a[1], a[2]) - luminance(b[0], b[1], b[2]))[0];
+    palette.unshift([
+      Math.round(darkest[0] * 0.36),
+      Math.round(darkest[1] * 0.34),
+      Math.round(darkest[2] * 0.42)
+    ]);
+  }
+
+  return palette.length ? palette.slice(0, size) : medianCutPalette(pixels, size);
+}
+
+function kMeansPalette(pixels, size) {
+  const sampled = deterministicSamplePixels(pixels, 12000);
+  let centers = medianCutPalette(sampled, Math.min(size, sampled.length)).map((color) => color.map(Number));
+  if (!centers.length) return [[0, 0, 0]];
+
+  for (let iteration = 0; iteration < 10; iteration += 1) {
+    const sums = centers.map(() => [0, 0, 0, 0]);
+    for (const pixel of sampled) {
+      let best = 0;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < centers.length; index += 1) {
+        const center = centers[index];
+        const distance = colorDistanceRgb(pixel[0], pixel[1], pixel[2], center[0], center[1], center[2]);
+        if (distance < bestDistance) {
+          best = index;
+          bestDistance = distance;
+        }
+      }
+      sums[best][0] += pixel[0];
+      sums[best][1] += pixel[1];
+      sums[best][2] += pixel[2];
+      sums[best][3] += 1;
+    }
+
+    centers = centers.map((center, index) => {
+      const sum = sums[index];
+      if (sum[3] === 0) return center;
+      return [
+        Math.round(sum[0] / sum[3]),
+        Math.round(sum[1] / sum[3]),
+        Math.round(sum[2] / sum[3])
+      ];
+    });
+  }
+
+  return centers;
+}
+
+function deterministicSamplePixels(pixels, limit) {
+  if (pixels.length <= limit) return pixels;
+  const stride = pixels.length / limit;
+  const sampled = [];
+  for (let index = 0; index < limit; index += 1) {
+    sampled.push(pixels[Math.floor(index * stride)]);
+  }
+  return sampled;
+}
+
+function colorBoxRange(pixels) {
+  const ranges = channelRanges(pixels);
+  return Math.max(ranges[0], ranges[1], ranges[2]);
+}
+
+function widestChannel(pixels) {
+  const ranges = channelRanges(pixels);
+  return ranges.indexOf(Math.max(ranges[0], ranges[1], ranges[2]));
+}
+
+function channelRanges(pixels) {
+  const min = [255, 255, 255];
+  const max = [0, 0, 0];
+  for (const pixel of pixels) {
+    for (let channel = 0; channel < 3; channel += 1) {
+      min[channel] = Math.min(min[channel], pixel[channel]);
+      max[channel] = Math.max(max[channel], pixel[channel]);
+    }
+  }
+  return [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+}
+
+function averageColor(pixels) {
+  const total = pixels.reduce((sum, pixel) => {
+    sum[0] += pixel[0];
+    sum[1] += pixel[1];
+    sum[2] += pixel[2];
+    return sum;
+  }, [0, 0, 0]);
+  return total.map((value) => Math.round(value / pixels.length));
+}
+
+function quantizePixelData(imageData, palette, settings, edgeMap) {
+  const output = new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
+  if (settings.ditherMode === "floyd") return floydSteinbergQuantize(output, palette, settings);
+  if (settings.ditherMode === "ordered") return orderedDitherQuantize(output, palette, settings);
+
+  for (let pixel = 0; pixel < output.width * output.height; pixel += 1) {
+    const index = pixel * 4;
+    if (output.data[index + 3] <= settings.alphaThreshold) {
+      output.data[index + 3] = 0;
+      continue;
+    }
+    const color = nearestPaletteColor(output.data[index], output.data[index + 1], output.data[index + 2], palette, edgeMap[pixel]);
+    output.data[index] = color[0];
+    output.data[index + 1] = color[1];
+    output.data[index + 2] = color[2];
+  }
+  return output;
+}
+
+function nearestPaletteColor(r, g, b, palette, edgeBias = 0) {
+  let best = palette[0];
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const color of palette) {
+    const distance = colorDistanceRgb(r, g, b, color[0], color[1], color[2]) - edgeBias * luminanceDistance(r, g, b, color);
+    if (distance < bestDistance) {
+      best = color;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+function colorDistanceRgb(r1, g1, b1, r2, g2, b2) {
+  return (r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2;
+}
+
+function luminance(r, g, b) {
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function luminanceDistance(r, g, b, color) {
+  const a = luminance(r, g, b);
+  const c = luminance(color[0], color[1], color[2]);
+  return Math.abs(a - c);
+}
+
+function rgbToHsl(r, g, b) {
+  const red = r / 255;
+  const green = g / 255;
+  const blue = b / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const lightness = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l: lightness };
+
+  const delta = max - min;
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  let hue;
+  if (max === red) {
+    hue = (green - blue) / delta + (green < blue ? 6 : 0);
+  } else if (max === green) {
+    hue = (blue - red) / delta + 2;
+  } else {
+    hue = (red - green) / delta + 4;
+  }
+  return { h: hue / 6, s: saturation, l: lightness };
+}
+
+function hslToRgb(h, s, l) {
+  if (s === 0) {
+    const value = Math.round(l * 255);
+    return [value, value, value];
+  }
+
+  const hueToRgb = (p, q, t) => {
+    let next = t;
+    if (next < 0) next += 1;
+    if (next > 1) next -= 1;
+    if (next < 1 / 6) return p + (q - p) * 6 * next;
+    if (next < 1 / 2) return q;
+    if (next < 2 / 3) return p + (q - p) * (2 / 3 - next) * 6;
+    return p;
+  };
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [
+    Math.round(hueToRgb(p, q, h + 1 / 3) * 255),
+    Math.round(hueToRgb(p, q, h) * 255),
+    Math.round(hueToRgb(p, q, h - 1 / 3) * 255)
+  ];
+}
+
+function celShadeRetracedPixels(data, width, height, settings, edgeMap) {
+  const strength = settings.retraceStrength || 0;
+  if (strength <= 0) return;
+
+  const shadeBands = Math.round(6 - strength * 3);
+  const hueBands = Math.round(20 - strength * 8);
+  const groups = new Map();
+
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const index = pixel * 4;
+    if (data[index + 3] <= settings.alphaThreshold) continue;
+    const hsl = rgbToHsl(data[index], data[index + 1], data[index + 2]);
+    const key = `${hsl.s < 0.1 ? "gray" : Math.floor(hsl.h * hueBands)}:${Math.floor(hsl.s * 4)}:${Math.floor(hsl.l * shadeBands)}`;
+    const group = groups.get(key) || { r: 0, g: 0, b: 0, count: 0 };
+    const edgeWeight = edgeMap[pixel] > 0.5 ? 2 : 1;
+    group.r += data[index] * edgeWeight;
+    group.g += data[index + 1] * edgeWeight;
+    group.b += data[index + 2] * edgeWeight;
+    group.count += edgeWeight;
+    groups.set(key, group);
+  }
+
+  const colors = new Map();
+  for (const [key, group] of groups.entries()) {
+    colors.set(key, [
+      Math.round(group.r / group.count),
+      Math.round(group.g / group.count),
+      Math.round(group.b / group.count)
+    ]);
+  }
+
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const index = pixel * 4;
+    if (data[index + 3] <= settings.alphaThreshold) continue;
+    const hsl = rgbToHsl(data[index], data[index + 1], data[index + 2]);
+    const key = `${hsl.s < 0.1 ? "gray" : Math.floor(hsl.h * hueBands)}:${Math.floor(hsl.s * 4)}:${Math.floor(hsl.l * shadeBands)}`;
+    const color = colors.get(key);
+    if (!color) continue;
+    data[index] = Math.round(data[index] * (1 - strength) + color[0] * strength);
+    data[index + 1] = Math.round(data[index + 1] * (1 - strength) + color[1] * strength);
+    data[index + 2] = Math.round(data[index + 2] * (1 - strength) + color[2] * strength);
+  }
+}
+
+function tracePixelSilhouette(data, width, height, settings, edgeMap) {
+  const strength = Math.max(settings.outlineStrength, settings.retraceStrength * 0.82);
+  if (strength <= 0) return;
+
+  const copy = new Uint8ClampedArray(data);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixel = y * width + x;
+      const index = pixel * 4;
+      if (copy[index + 3] <= settings.alphaThreshold) continue;
+
+      const boundary = touchesTransparentPixel8(pixel, copy, width, height, settings.alphaThreshold);
+      const contour = edgeMap[pixel] > 0.42 && isDarkerThanNeighbors(copy, width, height, x, y);
+      if (!boundary && !contour) continue;
+
+      const amount = boundary ? Math.min(0.92, strength) : Math.min(0.62, strength * 0.72);
+      const outline = [
+        Math.max(10, Math.round(copy[index] * 0.28)),
+        Math.max(8, Math.round(copy[index + 1] * 0.26)),
+        Math.max(14, Math.round(copy[index + 2] * 0.34))
+      ];
+      data[index] = Math.round(copy[index] * (1 - amount) + outline[0] * amount);
+      data[index + 1] = Math.round(copy[index + 1] * (1 - amount) + outline[1] * amount);
+      data[index + 2] = Math.round(copy[index + 2] * (1 - amount) + outline[2] * amount);
+      data[index + 3] = copy[index + 3] >= 128 ? 255 : copy[index + 3];
+    }
+  }
+}
+
+function touchesTransparentPixel8(pixel, data, width, height, alphaThreshold = 254) {
+  const x = pixel % width;
+  const y = Math.floor(pixel / width);
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) return true;
+      if (data[(ny * width + nx) * 4 + 3] <= alphaThreshold) return true;
+    }
+  }
+  return false;
+}
+
+function floydSteinbergQuantize(imageData, palette, settings) {
+  const { width, height } = imageData;
+  const work = Float32Array.from(imageData.data);
+  const output = new ImageData(width, height);
+  const strength = settings.ditherStrength;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = (y * width + x) * 4;
+      const alpha = work[index + 3];
+      if (alpha <= settings.alphaThreshold) {
+        output.data[index + 3] = 0;
+        continue;
+      }
+      const oldColor = [work[index], work[index + 1], work[index + 2]];
+      const nextColor = nearestPaletteColor(oldColor[0], oldColor[1], oldColor[2], palette);
+      output.data[index] = nextColor[0];
+      output.data[index + 1] = nextColor[1];
+      output.data[index + 2] = nextColor[2];
+      output.data[index + 3] = Math.round(alpha);
+      diffuseError(work, width, height, x + 1, y, oldColor, nextColor, 7 / 16 * strength);
+      diffuseError(work, width, height, x - 1, y + 1, oldColor, nextColor, 3 / 16 * strength);
+      diffuseError(work, width, height, x, y + 1, oldColor, nextColor, 5 / 16 * strength);
+      diffuseError(work, width, height, x + 1, y + 1, oldColor, nextColor, 1 / 16 * strength);
+    }
+  }
+  return output;
+}
+
+function diffuseError(work, width, height, x, y, oldColor, nextColor, amount) {
+  if (x < 0 || y < 0 || x >= width || y >= height) return;
+  const index = (y * width + x) * 4;
+  for (let channel = 0; channel < 3; channel += 1) {
+    work[index + channel] += (oldColor[channel] - nextColor[channel]) * amount;
+  }
+}
+
+function orderedDitherQuantize(imageData, palette, settings) {
+  const matrix = [
+    [0, 8, 2, 10],
+    [12, 4, 14, 6],
+    [3, 11, 1, 9],
+    [15, 7, 13, 5]
+  ];
+  const output = new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
+  const amount = 72 * settings.ditherStrength;
+  for (let y = 0; y < output.height; y += 1) {
+    for (let x = 0; x < output.width; x += 1) {
+      const index = (y * output.width + x) * 4;
+      if (output.data[index + 3] <= settings.alphaThreshold) {
+        output.data[index + 3] = 0;
+        continue;
+      }
+      const offset = ((matrix[y % 4][x % 4] + 0.5) / 16 - 0.5) * amount;
+      const color = nearestPaletteColor(
+        clampNumber(output.data[index] + offset, 0, 255, output.data[index]),
+        clampNumber(output.data[index + 1] + offset, 0, 255, output.data[index + 1]),
+        clampNumber(output.data[index + 2] + offset, 0, 255, output.data[index + 2]),
+        palette
+      );
+      output.data[index] = color[0];
+      output.data[index + 1] = color[1];
+      output.data[index + 2] = color[2];
+    }
+  }
+  return output;
+}
+
+function cleanupPixelClusters(data, width, height, passes, edgeMap, alphaThreshold) {
+  for (let pass = 0; pass < passes; pass += 1) {
+    const copy = new Uint8ClampedArray(data);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const pixel = y * width + x;
+        const index = pixel * 4;
+        if (copy[index + 3] <= alphaThreshold || edgeMap[pixel] > 0.55) continue;
+        const current = rgbKey(copy, index);
+        const counts = new Map();
+        let same = 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            if (ox === 0 && oy === 0) continue;
+            const next = ((y + oy) * width + x + ox) * 4;
+            if (copy[next + 3] <= alphaThreshold) continue;
+            const key = rgbKey(copy, next);
+            if (key === current) same += 1;
+            counts.set(key, (counts.get(key) || 0) + 1);
+          }
+        }
+        const winner = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+        if (winner && same <= 1 && winner[1] >= 4) {
+          const color = winner[0].split(",").map(Number);
+          data[index] = color[0];
+          data[index + 1] = color[1];
+          data[index + 2] = color[2];
+        }
+      }
+    }
+  }
+}
+
+function mergeTinyColorIslands(data, width, height, minArea, edgeMap, alphaThreshold) {
+  if (minArea <= 1) return;
+
+  const total = width * height;
+  const visited = new Uint8Array(total);
+  const component = [];
+  const stack = [];
+
+  for (let start = 0; start < total; start += 1) {
+    if (visited[start] || data[start * 4 + 3] <= alphaThreshold) continue;
+
+    component.length = 0;
+    stack.length = 0;
+    const startIndex = start * 4;
+    const key = rgbKey(data, startIndex);
+    let protectedEdge = false;
+    visited[start] = 1;
+    stack.push(start);
+
+    while (stack.length) {
+      const pixel = stack.pop();
+      component.push(pixel);
+      protectedEdge = protectedEdge || edgeMap[pixel] > 0.62;
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      const neighbors = [];
+      if (x > 0) neighbors.push(pixel - 1);
+      if (x < width - 1) neighbors.push(pixel + 1);
+      if (y > 0) neighbors.push(pixel - width);
+      if (y < height - 1) neighbors.push(pixel + width);
+
+      for (const next of neighbors) {
+        if (visited[next] || data[next * 4 + 3] <= alphaThreshold || rgbKey(data, next * 4) !== key) continue;
+        visited[next] = 1;
+        stack.push(next);
+      }
+    }
+
+    if (component.length > minArea || protectedEdge) continue;
+    const replacement = dominantNeighborColor(data, width, height, component, key, alphaThreshold);
+    if (!replacement) continue;
+    for (const pixel of component) {
+      const index = pixel * 4;
+      data[index] = replacement[0];
+      data[index + 1] = replacement[1];
+      data[index + 2] = replacement[2];
+    }
+  }
+}
+
+function dominantNeighborColor(data, width, height, component, ownKey, alphaThreshold) {
+  const counts = new Map();
+  const componentSet = new Set(component);
+  for (const pixel of component) {
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    const neighbors = [];
+    if (x > 0) neighbors.push(pixel - 1);
+    if (x < width - 1) neighbors.push(pixel + 1);
+    if (y > 0) neighbors.push(pixel - width);
+    if (y < height - 1) neighbors.push(pixel + width);
+    for (const next of neighbors) {
+      if (componentSet.has(next) || data[next * 4 + 3] <= alphaThreshold) continue;
+      const key = rgbKey(data, next * 4);
+      if (key === ownKey) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const winner = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return winner ? winner[0].split(",").map(Number) : null;
+}
+
+function rgbKey(data, index) {
+  return `${data[index]},${data[index + 1]},${data[index + 2]}`;
+}
+
+function reinforcePixelOutlines(data, width, height, strength, alphaThreshold, edgeMap) {
+  if (strength <= 0) return;
+  const copy = new Uint8ClampedArray(data);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixel = y * width + x;
+      const index = pixel * 4;
+      if (copy[index + 3] <= alphaThreshold) continue;
+      const boundary = touchesTransparentPixel(pixel, copy, width, height);
+      const internalDarkEdge = edgeMap[pixel] > 0.48 && isDarkerThanNeighbors(copy, width, height, x, y);
+      if (!boundary && !internalDarkEdge) continue;
+      const amount = boundary ? strength : strength * 0.68;
+      data[index] = Math.round(copy[index] * (1 - amount) + 18 * amount);
+      data[index + 1] = Math.round(copy[index + 1] * (1 - amount) + 16 * amount);
+      data[index + 2] = Math.round(copy[index + 2] * (1 - amount) + 28 * amount);
+    }
+  }
+}
+
+function isDarkerThanNeighbors(data, width, height, x, y) {
+  const pixel = y * width + x;
+  const index = pixel * 4;
+  const current = luminance(data[index], data[index + 1], data[index + 2]);
+  let total = 0;
+  let count = 0;
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const next = (ny * width + nx) * 4;
+      if (data[next + 3] === 0) continue;
+      total += luminance(data[next], data[next + 1], data[next + 2]);
+      count += 1;
+    }
+  }
+  return count > 0 && current + 16 < total / count;
+}
+
+function upscaleImageDataNearest(imageData, scale) {
+  const canvas = document.createElement("canvas");
+  canvas.width = imageData.width * scale;
+  canvas.height = imageData.height * scale;
+  const source = document.createElement("canvas");
+  source.width = imageData.width;
+  source.height = imageData.height;
+  source.getContext("2d").putImageData(imageData, 0, 0);
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+function packPixelCanvases(canvases, settings) {
+  const padding = settings.padding;
+  const maxWidth = Math.max(...canvases.map((canvas) => canvas.width));
+  const maxHeight = Math.max(...canvases.map((canvas) => canvas.height));
+  const columns = settings.columns > 0 ? Math.min(settings.columns, canvases.length) : Math.ceil(Math.sqrt(canvases.length));
+  const rows = Math.ceil(canvases.length / columns);
+  const output = document.createElement("canvas");
+  output.width = columns * maxWidth + (columns + 1) * padding;
+  output.height = rows * maxHeight + (rows + 1) * padding;
+  const ctx = output.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  canvases.forEach((canvas, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = padding + column * (maxWidth + padding);
+    const y = padding + row * (maxHeight + padding);
+    drawFrameWithOptionalExtrusion(ctx, canvas, x, y, Math.max(0, Math.ceil(padding / 2)));
+  });
+
+  return output;
+}
+
+function drawPixelOutput(canvas) {
+  ui.pixelCanvas.width = canvas.width;
+  ui.pixelCanvas.height = canvas.height;
+  ui.pixelCanvas.getContext("2d").drawImage(canvas, 0, 0);
+  ui.pixelCanvas.style.display = "block";
+  ui.pixelEmptyState.style.display = "none";
+}
+
+function revokePixelOutput() {
+  if (state.pixelBlobUrl) URL.revokeObjectURL(state.pixelBlobUrl);
+  state.pixelBlobUrl = null;
+  ui.downloadPixelPng.disabled = true;
+}
+
+function preparePixelDownload(canvas) {
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    revokePixelOutput();
+    state.pixelBlobUrl = URL.createObjectURL(blob);
+    ui.downloadPixelPng.disabled = false;
+  }, "image/png");
+}
+
 function buildMetadata(packed, decoded, settings, sourceFile) {
   return {
     meta: {
@@ -1430,7 +2397,11 @@ function downloadUrl(url, filename) {
 
 ui.fileInput.addEventListener("change", () => onFiles(ui.fileInput.files));
 ui.backgroundFileInput.addEventListener("change", () => onFiles(ui.backgroundFileInput.files));
+ui.pixelFileInput.addEventListener("change", () => onPixelFiles(ui.pixelFileInput.files));
+ui.pixelFolderInput.addEventListener("change", () => onPixelFiles(ui.pixelFolderInput.files));
+ui.pixelFolderBtn.addEventListener("click", () => ui.pixelFolderInput.click());
 ui.convertBtn.addEventListener("click", convert);
+ui.pixelConvertBtn.addEventListener("click", convertPixelArt);
 
 ui.tabButtons.forEach((button) => {
   button.addEventListener("click", () => switchPage(button.dataset.pageTarget));
@@ -1446,6 +2417,8 @@ ui.tabButtons.forEach((button) => {
     scheduleFirstFramePreview();
   });
 });
+
+ui.pixelPaletteMode.addEventListener("change", syncPixelControls);
 
 [
   ui.frameWidth,
@@ -1477,6 +2450,10 @@ ui.downloadBgPreview.addEventListener("click", () => {
   if (state.backgroundPreviewBlobUrl) downloadUrl(state.backgroundPreviewBlobUrl, `${state.outputName}_background_removed.png`);
 });
 
+ui.downloadPixelPng.addEventListener("click", () => {
+  if (state.pixelBlobUrl) downloadUrl(state.pixelBlobUrl, `${state.outputName}_pixel_art.png`);
+});
+
 function bindDropZone(dropZone, onDrop) {
   ["dragenter", "dragover"].forEach((eventName) => {
     dropZone.addEventListener(eventName, (event) => {
@@ -1500,6 +2477,7 @@ function bindDropZone(dropZone, onDrop) {
 
 bindDropZone(ui.dropZone, onFiles);
 bindDropZone(ui.backgroundDropZone, onFiles);
+bindDropZone(ui.pixelDropZone, onPixelFiles);
 
 syncConditionalControls();
 updateCodecStatus();
