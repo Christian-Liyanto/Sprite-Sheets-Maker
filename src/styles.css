@@ -254,6 +254,14 @@ select {
   font-size: 0.94rem;
 }
 
+.workflow-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
 label {
   display: grid;
   gap: 6px;

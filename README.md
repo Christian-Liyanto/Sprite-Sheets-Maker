@@ -45,30 +45,26 @@ Suggested C# modules:
 - `ImageLoader`: reads PNG/WebP/JPEG/GIF frames or image sequences into RGBA buffers.
 - `EdgeAnalyzer`: computes luminance plus alpha-aware Sobel edges.
 - `Preprocessor`: smooths only low-edge, low-color-distance neighborhoods.
-- `EdgeAwareResampler`: downsamples blocks with edge-weighted and alpha-weighted sampling.
-- `RetracePass`: posterizes hue, saturation, lightness, and alpha before palette reduction so the result reads as redrawn pixel art instead of a blurred resize.
+- `ReferenceShrinker`: shrinks the source to the target grid with edge-weighted and alpha-weighted sampling.
+- `SilhouetteRedrawer`: hardens the alpha mask, fills tiny silhouette gaps, and removes stray edge pixels.
 - `PaletteBuilder`: creates fixed palettes, deterministic retrace palettes, Median Cut, or K-means adaptive palettes.
 - `Quantizer`: maps pixels to nearest palette color with optional Floyd-Steinberg or ordered Bayer dithering.
-- `ClusterCleaner`: removes isolated one-pixel noise and merges tiny color islands while preserving strong edge-map pixels.
+- `ClusterPlanner`: merges tiny color islands into readable major clusters.
+- `SelectiveShading`: applies clustered shade bands and sparse highlight pixels from the reduced reference.
 - `OutlinePass`: retraces alpha-boundary and dark contour pixels to improve sprite readability.
+- `ClusterCleaner`: removes isolated one-pixel noise while preserving strong edge-map pixels.
 - `AlphaCleaner`: removes low-alpha residue, bleeds foreground RGB into transparent pixels, and preserves alpha.
 - `SheetPacker`: packs converted frames into a single sheet with padding and edge extrusion.
 
 Processing stages:
 
-1. Load RGBA image or ordered sequence frames.
-2. Compute alpha-aware Sobel edge map.
-3. Smooth noisy gradients only where edge strength is low.
-4. Edge-aware downsample to target sprite size.
-5. Posterize local forms into retrace-friendly hue and shade bands.
-6. Build retrace, adaptive, or fixed palette, typically 16-128 colors.
-7. Quantize with optional dithering.
-8. Cel-shade matching hue/lightness bands for clustered shading.
-9. Clean isolated clusters and merge tiny color islands while protecting intentional edges.
-10. Retrace silhouette and internal dark contour pixels.
-11. Clean alpha and transparent RGB.
-12. Upscale with nearest neighbor only.
-13. Pack batch frames into one sheet.
+1. Shrink reference mentally: smooth only low-importance gradients, then edge-aware downsample into the target pixel grid.
+2. Redraw silhouette: harden alpha, fill tiny enclosed gaps, remove stray edge pixels, and preserve the strongest contour.
+3. Reduce colors: build a retrace, adaptive, or fixed palette, typically 16-128 colors, then quantize deterministically.
+4. Define major clusters: merge tiny color islands and isolated pixels into nearby dominant color clusters.
+5. Add selective shading: cel-shade hue and lightness bands instead of keeping noisy gradients.
+6. Add highlights: keep only sparse local highlight peaks from the reduced reference.
+7. Cleanup noisy pixels: reinforce outlines, remove alpha residue, bleed safe foreground RGB into transparent pixels, upscale with nearest neighbor, then pack batch frames.
 
 Edge-aware downsampling pseudocode:
 

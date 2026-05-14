@@ -1350,7 +1350,8 @@ async function convertPixelArt() {
     ui.pixelSummary.innerHTML = [
       `<strong>${canvases.length}</strong> frame${canvases.length === 1 ? "" : "s"} converted.`,
       `Output: <strong>${output.width}x${output.height}</strong>.`,
-      `Palette: ${["retrace", "adaptive", "kmeans"].includes(settings.paletteMode) ? `${settings.paletteSize} ${settings.paletteMode} colors` : settings.paletteMode}.`
+      `Palette: ${["retrace", "adaptive", "kmeans"].includes(settings.paletteMode) ? `${settings.paletteSize} ${settings.paletteMode} colors` : settings.paletteMode}.`,
+      "Workflow: shrink reference, redraw silhouette, reduce colors, define clusters, shade, highlight, cleanup."
     ].join(" ");
     setPixelProgress("Done.");
   } catch (error) {
@@ -1366,30 +1367,128 @@ function processPixelArtCanvas(sourceCanvas, settings) {
   const source = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
   const sourceEdges = computeEdgeMap(source.data, source.width, source.height);
   const preprocessed = edgeAwarePreprocess(source.data, source.width, source.height, sourceEdges);
-  const reduced = edgeAwareDownsample(preprocessed, source.width, source.height, settings.width, settings.height, sourceEdges, settings.edgeStrength);
+  const reduced = shrinkReferenceToPixelGrid(preprocessed, source.width, source.height, settings.width, settings.height, sourceEdges, settings);
   removeLowAlphaNoise(reduced.data, settings.alphaThreshold);
 
-  const traced = retracePixelForms(reduced, settings);
-  const reducedEdges = computeEdgeMap(traced.data, traced.width, traced.height);
-  const palette = buildPixelPalette(traced.data, settings);
-  const quantized = quantizePixelData(traced, palette, settings, reducedEdges);
+  const silhouette = redrawPixelSilhouette(reduced, settings);
+  const silhouetteEdges = computeEdgeMap(silhouette.data, silhouette.width, silhouette.height);
+  const colorReduced = reducePixelArtColors(silhouette, settings, silhouetteEdges);
+  defineMajorPixelClusters(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
+  addSelectivePixelShading(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
+  addSelectivePixelHighlights(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouette.data, silhouetteEdges);
+  reinforcePixelOutlines(colorReduced.data, colorReduced.width, colorReduced.height, settings.outlineStrength, settings.alphaThreshold, silhouetteEdges);
   if (settings.paletteMode === "retrace") {
-    celShadeRetracedPixels(quantized.data, quantized.width, quantized.height, settings, reducedEdges);
+    tracePixelSilhouette(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
   }
-  cleanupPixelClusters(quantized.data, quantized.width, quantized.height, settings.cleanupPasses, reducedEdges, settings.alphaThreshold);
-  mergeTinyColorIslands(quantized.data, quantized.width, quantized.height, Math.max(2, settings.cleanupPasses + 2 + Math.round(settings.retraceStrength * 3)), reducedEdges, settings.alphaThreshold);
-  reinforcePixelOutlines(quantized.data, quantized.width, quantized.height, settings.outlineStrength, settings.alphaThreshold, reducedEdges);
-  if (settings.paletteMode === "retrace") {
-    tracePixelSilhouette(quantized.data, quantized.width, quantized.height, settings, reducedEdges);
-  }
-  removeLowAlphaNoise(quantized.data, settings.alphaThreshold);
-  bleedForegroundRgbIntoTransparentEdges(quantized.data, quantized.width, quantized.height, {
+  cleanupNoisyPixelArtifacts(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
+  bleedForegroundRgbIntoTransparentEdges(colorReduced.data, colorReduced.width, colorReduced.height, {
     rewriteSemiTransparent: true,
     fillFullyTransparent: true,
     fullCanvasExtrusion: false
   });
 
-  return upscaleImageDataNearest(quantized, settings.upscale);
+  return upscaleImageDataNearest(colorReduced, settings.upscale);
+}
+
+function shrinkReferenceToPixelGrid(data, sourceWidth, sourceHeight, targetWidth, targetHeight, edgeMap, settings) {
+  return edgeAwareDownsample(data, sourceWidth, sourceHeight, targetWidth, targetHeight, edgeMap, settings.edgeStrength);
+}
+
+function redrawPixelSilhouette(imageData, settings) {
+  const output = retracePixelForms(imageData, settings);
+  const copy = new Uint8ClampedArray(output.data);
+  const strength = settings.retraceStrength || 0;
+
+  for (let y = 0; y < output.height; y += 1) {
+    for (let x = 0; x < output.width; x += 1) {
+      const pixel = y * output.width + x;
+      const index = pixel * 4;
+      const alpha = copy[index + 3];
+      const opaqueNeighbors = countOpaqueNeighbors(copy, output.width, output.height, x, y, settings.alphaThreshold);
+
+      if (alpha <= settings.alphaThreshold && opaqueNeighbors >= 5 && strength > 0.45) {
+        const color = dominantNeighborRgbForPixel(copy, output.width, output.height, x, y, settings.alphaThreshold);
+        if (color) {
+          output.data[index] = color[0];
+          output.data[index + 1] = color[1];
+          output.data[index + 2] = color[2];
+          output.data[index + 3] = 255;
+        }
+        continue;
+      }
+
+      if (alpha <= settings.alphaThreshold || (alpha < 128 && opaqueNeighbors <= 1 && strength > 0.35)) {
+        output.data[index + 3] = 0;
+        continue;
+      }
+
+      const hardAlpha = alpha >= 128 ? 255 : 0;
+      output.data[index + 3] = Math.round(alpha * (1 - strength * 0.45) + hardAlpha * strength * 0.45);
+    }
+  }
+
+  return output;
+}
+
+function reducePixelArtColors(imageData, settings, edgeMap) {
+  const palette = buildPixelPalette(imageData.data, settings);
+  return quantizePixelData(imageData, palette, settings, edgeMap);
+}
+
+function defineMajorPixelClusters(data, width, height, settings, edgeMap) {
+  cleanupPixelClusters(data, width, height, settings.cleanupPasses, edgeMap, settings.alphaThreshold);
+  mergeTinyColorIslands(data, width, height, Math.max(2, settings.cleanupPasses + 2 + Math.round(settings.retraceStrength * 3)), edgeMap, settings.alphaThreshold);
+}
+
+function addSelectivePixelShading(data, width, height, settings, edgeMap) {
+  if (settings.paletteMode !== "retrace") return;
+  celShadeRetracedPixels(data, width, height, settings, edgeMap);
+}
+
+function addSelectivePixelHighlights(data, width, height, settings, referenceData, edgeMap) {
+  if (settings.paletteMode !== "retrace" || settings.retraceStrength <= 0) return;
+  const copy = new Uint8ClampedArray(data);
+  const amount = Math.min(0.42, settings.retraceStrength * 0.34);
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixel = y * width + x;
+      const index = pixel * 4;
+      if (copy[index + 3] <= settings.alphaThreshold || edgeMap[pixel] > 0.62) continue;
+
+      const referenceLum = luminance(referenceData[index], referenceData[index + 1], referenceData[index + 2]);
+      if (referenceLum < 172) continue;
+
+      let neighborLum = 0;
+      let neighborCount = 0;
+      let brighterNeighbors = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const nextPixel = (y + oy) * width + x + ox;
+          const next = nextPixel * 4;
+          if (referenceData[next + 3] <= settings.alphaThreshold) continue;
+          const nextLum = luminance(referenceData[next], referenceData[next + 1], referenceData[next + 2]);
+          neighborLum += nextLum;
+          neighborCount += 1;
+          if (nextLum > referenceLum) brighterNeighbors += 1;
+        }
+      }
+
+      const averageLum = neighborCount ? neighborLum / neighborCount : 0;
+      if (referenceLum < averageLum + 18 || brighterNeighbors > 2) continue;
+
+      data[index] = Math.round(copy[index] * (1 - amount) + 255 * amount);
+      data[index + 1] = Math.round(copy[index + 1] * (1 - amount) + 255 * amount);
+      data[index + 2] = Math.round(copy[index + 2] * (1 - amount) + 245 * amount);
+    }
+  }
+}
+
+function cleanupNoisyPixelArtifacts(data, width, height, settings, edgeMap) {
+  cleanupPixelClusters(data, width, height, Math.max(1, settings.cleanupPasses), edgeMap, settings.alphaThreshold);
+  mergeTinyColorIslands(data, width, height, Math.max(2, settings.cleanupPasses + 1), edgeMap, settings.alphaThreshold);
+  removeLowAlphaNoise(data, settings.alphaThreshold);
 }
 
 function computeEdgeMap(data, width, height) {
@@ -1942,6 +2041,38 @@ function touchesTransparentPixel8(pixel, data, width, height, alphaThreshold = 2
     }
   }
   return false;
+}
+
+function countOpaqueNeighbors(data, width, height, x, y, alphaThreshold) {
+  let count = 0;
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      if (data[(ny * width + nx) * 4 + 3] > alphaThreshold) count += 1;
+    }
+  }
+  return count;
+}
+
+function dominantNeighborRgbForPixel(data, width, height, x, y, alphaThreshold) {
+  const counts = new Map();
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const index = (ny * width + nx) * 4;
+      if (data[index + 3] <= alphaThreshold) continue;
+      const key = rgbKey(data, index);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const winner = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return winner ? winner[0].split(",").map(Number) : null;
 }
 
 function floydSteinbergQuantize(imageData, palette, settings) {

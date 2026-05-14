@@ -237,7 +237,20 @@
               <button id="pixelFolderBtn" type="button">Choose Folder</button>
 
               <div class="control-group">
-                <h2>Output Grid</h2>
+                <h2>Workflow</h2>
+                <ol class="workflow-list">
+                  <li>Shrink reference mentally</li>
+                  <li>Redraw silhouette</li>
+                  <li>Reduce colors</li>
+                  <li>Define major clusters</li>
+                  <li>Add selective shading</li>
+                  <li>Add highlights</li>
+                  <li>Cleanup noisy pixels</li>
+                </ol>
+              </div>
+
+              <div class="control-group">
+                <h2>1. Shrink Reference</h2>
                 <div class="split">
                   <label>
                     <span>Frame width</span>
@@ -255,7 +268,7 @@
               </div>
 
               <div class="control-group">
-                <h2>Palette</h2>
+                <h2>3. Reduce Colors</h2>
                 <label>
                   <span>Palette</span>
                   <select id="pixelPaletteMode">
@@ -275,7 +288,7 @@
               </div>
 
               <div class="control-group">
-                <h2>Style</h2>
+                <h2>Redraw Passes</h2>
                 <label>
                   <span>Retrace strength (%)</span>
                   <input id="pixelRetraceStrength" type="number" min="0" max="100" step="1" value="82">
