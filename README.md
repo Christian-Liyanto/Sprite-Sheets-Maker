@@ -49,9 +49,11 @@ Suggested C# modules:
 - `SilhouetteRedrawer`: hardens the alpha mask, fills tiny silhouette gaps, and removes stray edge pixels.
 - `PaletteBuilder`: creates fixed palettes, deterministic retrace palettes, Median Cut, or K-means adaptive palettes.
 - `Quantizer`: maps pixels to nearest palette color with optional Floyd-Steinberg or ordered Bayer dithering.
+- `ObjectMosaic`: optional connected-region clustering that turns similar neighboring pixels into larger object-like color masses before palette reduction.
 - `ClusterPlanner`: merges tiny color islands into readable major clusters.
 - `SelectiveShading`: applies clustered shade bands and sparse highlight pixels from the reduced reference.
 - `OutlinePass`: retraces alpha-boundary and dark contour pixels to improve sprite readability.
+- `HumanPolish`: removes accidental-looking teeth, diagonal crumbs, pinholes, and isolated transition pixels while preserving connected ramps and dark contour details.
 - `ClusterCleaner`: removes isolated one-pixel noise while preserving strong edge-map pixels.
 - `AlphaCleaner`: removes low-alpha residue, bleeds foreground RGB into transparent pixels, and preserves alpha.
 - `SheetPacker`: packs converted frames into a single sheet with padding and edge extrusion.
@@ -60,11 +62,17 @@ Processing stages:
 
 1. Shrink reference mentally: smooth only low-importance gradients, then edge-aware downsample into the target pixel grid.
 2. Redraw silhouette: harden alpha, fill tiny enclosed gaps, remove stray edge pixels, and preserve the strongest contour.
-3. Reduce colors: build a retrace, adaptive, or fixed palette, typically 16-128 colors, then quantize deterministically.
+3. Reduce colors: optionally apply Object Mosaic clustering, then build a retrace, adaptive, or fixed palette, typically 16-128 colors, and quantize deterministically.
 4. Define major clusters: merge tiny color islands and isolated pixels into nearby dominant color clusters.
 5. Add selective shading: cel-shade hue and lightness bands instead of keeping noisy gradients.
 6. Add highlights: keep only sparse local highlight peaks from the reduced reference.
-7. Cleanup noisy pixels: reinforce outlines, remove alpha residue, bleed safe foreground RGB into transparent pixels, upscale with nearest neighbor, then pack batch frames.
+7. Cleanup noisy pixels: apply human polish, reinforce outlines, remove alpha residue, bleed safe foreground RGB into transparent pixels, upscale with nearest neighbor, then pack batch frames.
+
+The retrace mode intentionally favors larger readable color masses over smooth gradient preservation. Intermediate tones are collapsed into limited ramps, isolated transitional pixels are absorbed into neighboring clusters, and low-alpha residue is hardened or removed so the result reads closer to hand-placed pixel art.
+
+Object Mosaic is available as an optional Pixel Art mode. It is useful for big readable shapes because it segments the source into larger color regions before quantization, but it should stay optional for small sprites where eyes, outlines, and tiny silhouette details need tighter control.
+
+Numeric controls use sliders with interaction tooltips, so values remain visible while dragging without crowding the tool panels.
 
 Edge-aware downsampling pseudocode:
 
@@ -126,6 +134,7 @@ Optimization strategies:
 - Limit median-cut input by deterministic stride sampling for very large images.
 - Keep pixel-art sharpness by disabling interpolation except in explicit preprocessing and by using nearest-neighbor reconstruction only.
 - Run RGB bleeding after alpha cleanup so removed residue cannot contaminate transparent pixels.
+- Conversion actions show a blocking backdrop with a progress bar so controls cannot be changed while frames are decoding, processing, packing, or exporting.
 
 ## Notes
 

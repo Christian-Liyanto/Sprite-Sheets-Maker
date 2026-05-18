@@ -59,6 +59,11 @@ const ui = {
   downloadPng: $("downloadPng"),
   downloadMeta: $("downloadMeta"),
   downloadBgPreview: $("downloadBgPreview"),
+  conversionBackdrop: $("conversionBackdrop"),
+  conversionTitle: $("conversionTitle"),
+  conversionMessage: $("conversionMessage"),
+  conversionProgressBar: $("conversionProgressBar"),
+  conversionProgressValue: $("conversionProgressValue"),
   pixelDropZone: $("pixelDropZone"),
   pixelFileInput: $("pixelFileInput"),
   pixelFolderInput: $("pixelFolderInput"),
@@ -70,11 +75,15 @@ const ui = {
   pixelPaletteMode: $("pixelPaletteMode"),
   pixelPaletteSizeField: $("pixelPaletteSizeField"),
   pixelPaletteSize: $("pixelPaletteSize"),
+  pixelObjectMosaic: $("pixelObjectMosaic"),
+  pixelMosaicStrengthField: $("pixelMosaicStrengthField"),
+  pixelMosaicStrength: $("pixelMosaicStrength"),
   pixelRetraceStrength: $("pixelRetraceStrength"),
   pixelEdgeStrength: $("pixelEdgeStrength"),
   pixelCleanupPasses: $("pixelCleanupPasses"),
   pixelOutlineStrength: $("pixelOutlineStrength"),
   pixelAlphaThreshold: $("pixelAlphaThreshold"),
+  pixelPolishStrength: $("pixelPolishStrength"),
   pixelDitherMode: $("pixelDitherMode"),
   pixelDitherStrength: $("pixelDitherStrength"),
   pixelColumns: $("pixelColumns"),
@@ -108,6 +117,75 @@ function setPixelProgress(message, isWarning = false) {
   ui.pixelProgress.innerHTML = isWarning ? `<span class="warning">${message}</span>` : message;
 }
 
+function showConversionBackdrop(title, message, progress = 0) {
+  ui.conversionTitle.textContent = title;
+  ui.conversionBackdrop.hidden = false;
+  updateConversionBackdrop(message, progress);
+}
+
+function updateConversionBackdrop(message, progress) {
+  const value = clampNumber(progress, 0, 100, 0);
+  ui.conversionMessage.textContent = message;
+  ui.conversionProgressBar.style.width = `${value}%`;
+  ui.conversionProgressValue.textContent = `${Math.round(value)}%`;
+}
+
+function hideConversionBackdrop() {
+  ui.conversionBackdrop.hidden = true;
+}
+
+function waitForUiPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function setupRangeTooltips() {
+  document.querySelectorAll('input[type="range"]').forEach((input) => {
+    const parent = input.closest("label");
+    if (!parent) return;
+    parent.classList.add("range-field");
+    const tooltip = document.createElement("span");
+    tooltip.className = "range-tooltip";
+    parent.append(tooltip);
+
+    const update = () => {
+      const min = Number(input.min || 0);
+      const max = Number(input.max || 100);
+      const value = Number(input.value);
+      const percent = max === min ? 0 : (value - min) / (max - min);
+      input.style.setProperty("--range-fill", `${percent * 100}%`);
+      tooltip.style.left = `${percent * 100}%`;
+      tooltip.textContent = formatRangeValue(input);
+    };
+
+    const show = () => {
+      update();
+      parent.classList.add("show-range-tooltip");
+    };
+    const hide = () => parent.classList.remove("show-range-tooltip");
+
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
+    input.addEventListener("pointerdown", show);
+    input.addEventListener("pointermove", () => {
+      if (parent.classList.contains("show-range-tooltip")) update();
+    });
+    input.addEventListener("pointerup", hide);
+    input.addEventListener("pointercancel", hide);
+    input.addEventListener("focus", show);
+    input.addEventListener("blur", hide);
+    update();
+  });
+}
+
+function formatRangeValue(input) {
+  const label = input.closest("label")?.querySelector("span")?.textContent || "";
+  const step = Number(input.step || 1);
+  const value = Number(input.value);
+  const decimals = step > 0 && step < 1 ? String(step).split(".")[1]?.length || 1 : 0;
+  const text = value.toFixed(decimals);
+  return label.includes("(%)") ? `${text}%` : text;
+}
+
 function switchPage(page) {
   ui.toolPages.forEach((toolPage) => {
     toolPage.classList.toggle("active", toolPage.dataset.page === page);
@@ -131,6 +209,7 @@ function syncFrameSizeControls() {
 
 function syncPixelControls() {
   ui.pixelPaletteSizeField.hidden = !["retrace", "adaptive", "kmeans"].includes(ui.pixelPaletteMode.value);
+  ui.pixelMosaicStrengthField.hidden = !ui.pixelObjectMosaic.checked;
 }
 
 function syncTransparencyControls() {
@@ -188,12 +267,15 @@ function getPixelSettings() {
     height: clampNumber(ui.pixelHeight.value, 4, 512, 64),
     upscale: clampNumber(ui.pixelUpscale.value, 1, 12, 4),
     paletteMode: ui.pixelPaletteMode.value,
-    paletteSize: Math.round(clampNumber(ui.pixelPaletteSize.value, 16, 128, 24)),
-    retraceStrength: clampNumber(ui.pixelRetraceStrength.value, 0, 100, 82) / 100,
-    edgeStrength: clampNumber(ui.pixelEdgeStrength.value, 0, 100, 85) / 100,
-    cleanupPasses: Math.round(clampNumber(ui.pixelCleanupPasses.value, 0, 4, 3)),
-    outlineStrength: clampNumber(ui.pixelOutlineStrength.value, 0, 100, 70) / 100,
-    alphaThreshold: percentToByteThreshold(ui.pixelAlphaThreshold.value, 1),
+    paletteSize: Math.round(clampNumber(ui.pixelPaletteSize.value, 16, 128, 18)),
+    objectMosaic: ui.pixelObjectMosaic.checked,
+    mosaicStrength: clampNumber(ui.pixelMosaicStrength.value, 0, 100, 55) / 100,
+    retraceStrength: clampNumber(ui.pixelRetraceStrength.value, 0, 100, 88) / 100,
+    edgeStrength: clampNumber(ui.pixelEdgeStrength.value, 0, 100, 76) / 100,
+    cleanupPasses: Math.round(clampNumber(ui.pixelCleanupPasses.value, 0, 8, 5)),
+    outlineStrength: clampNumber(ui.pixelOutlineStrength.value, 0, 100, 76) / 100,
+    alphaThreshold: percentToByteThreshold(ui.pixelAlphaThreshold.value, 2),
+    polishStrength: clampNumber(ui.pixelPolishStrength.value, 0, 100, 62) / 100,
     ditherMode: ui.pixelDitherMode.value,
     ditherStrength: clampNumber(ui.pixelDitherStrength.value, 0, 100, 35) / 100,
     columns: Math.round(clampNumber(ui.pixelColumns.value, 0, 256, 0)),
@@ -464,20 +546,33 @@ async function convert() {
   const settings = getSettings();
   resetDownloads();
   ui.convertBtn.disabled = true;
+  showConversionBackdrop("Converting Sprite Sheet", "Preparing conversion...", 0);
+  await waitForUiPaint();
 
   try {
     setProgress("Decoding frames...");
-    const decoded = await decodeFrames(state.files, settings, (message) => setProgress(message));
+    updateConversionBackdrop("Decoding frames...", 8);
+    const decoded = await decodeFrames(state.files, settings, (message, progress) => {
+      setProgress(message);
+      const percent = Number.isFinite(progress) ? 8 + progress * 42 : 18;
+      updateConversionBackdrop(message, percent);
+    });
 
     if (!decoded.frames.length) {
       throw new Error("No frames could be decoded from this file.");
     }
 
     setProgress(`Processing ${decoded.frames.length} frames...`);
-    let frames = processFrames(decoded.frames, decoded.source, settings);
+    updateConversionBackdrop(`Processing ${decoded.frames.length} frames...`, 52);
+    let frames = await processFramesWithProgress(decoded.frames, decoded.source, settings, (message, progress) => {
+      setProgress(message);
+      updateConversionBackdrop(message, 52 + progress * 24);
+    });
 
     const beforeDuplicates = frames.length;
     if (settings.removeDuplicates) {
+      updateConversionBackdrop("Removing duplicate frames...", 78);
+      await waitForUiPaint();
       frames = removeDuplicateFrames(frames, settings.duplicateThreshold);
     }
 
@@ -486,6 +581,8 @@ async function convert() {
     }
 
     setProgress("Packing sprite sheet...");
+    updateConversionBackdrop("Packing sprite sheet...", 88);
+    await waitForUiPaint();
     const packed = packFrames(frames, decoded, settings);
     drawSheet(packed);
     const metadata = buildMetadata(packed, decoded, settings, state.files.length > 1 ? `${state.files.length} image sequence files` : state.file.name);
@@ -493,11 +590,15 @@ async function convert() {
 
     prepareDownloads(packed.canvas, metadataText, settings.metadataFormat);
     showSummary(decoded.frames.length, beforeDuplicates - frames.length, packed, settings.metadataFormat);
+    updateConversionBackdrop("Done.", 100);
     setProgress("Done.");
+    await waitForUiPaint();
   } catch (error) {
     console.error(error);
+    updateConversionBackdrop(error.message || "Conversion failed.", 100);
     setProgress(error.message || "Conversion failed.", true);
   } finally {
+    hideConversionBackdrop();
     ui.convertBtn.disabled = false;
   }
 }
@@ -536,7 +637,7 @@ async function decodeImageSequenceFrames(files, settings, report) {
     });
     maxWidth = Math.max(maxWidth, decoded.source.width);
     maxHeight = Math.max(maxHeight, decoded.source.height);
-    if (index % 10 === 0) report(`Decoded ${index + 1} sequence frames...`);
+    if (index % 10 === 0 || index === limit - 1) report(`Decoded ${index + 1} sequence frames...`, (index + 1) / limit);
   }
 
   return {
@@ -577,7 +678,7 @@ async function decodeImageFrames(file, settings, report) {
         });
         source = source || { width: image.displayWidth, height: image.displayHeight };
         image.close();
-        if (index % 10 === 0) report(`Decoded ${index + 1} image frames...`);
+        if (index % 10 === 0 || index === limit - 1) report(`Decoded ${index + 1} image frames...`, (index + 1) / limit);
       } catch (error) {
         if (frames.length) break;
         throw error;
@@ -652,7 +753,7 @@ async function decodeVideoFrames(file, settings, report) {
         duration: Math.round(frameDuration),
         sourceIndex: index
       });
-      if (index % 10 === 0) report(`Decoded ${index + 1} video frames...`);
+      if (index % 10 === 0 || index === count - 1) report(`Decoded ${index + 1} video frames...`, (index + 1) / count);
     }
 
     return {
@@ -731,7 +832,10 @@ async function decodeVideoAtSourceRate(video, width, height, settings, report) {
       });
       lastMediaTime = mediaTime;
 
-      if (frames.length % 10 === 0) report(`Decoded ${frames.length} source video frames...`);
+      if (frames.length % 10 === 0) {
+        const progress = Number.isFinite(maxFrames) ? frames.length / maxFrames : null;
+        report(`Decoded ${frames.length} source video frames...`, progress);
+      }
       if (frames.length >= maxFrames) {
         finish(false);
         return;
@@ -812,6 +916,43 @@ function processFrames(frames, source, settings) {
   if (settings.cropMode === "global") {
     processed = cropGlobal(processed);
   } else if (settings.cropMode === "perFrame") {
+    processed = processed.map(cropSingleFrame);
+  }
+
+  return processed;
+}
+
+async function processFramesWithProgress(frames, source, settings, report) {
+  const target = targetSize(source, settings);
+  let processed = [];
+
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
+    const canvas = resizeFrame(frame.canvas, target, settings.fitMode);
+    applyBackgroundRemoval(canvas, settings);
+    processed.push({
+      canvas,
+      duration: frame.duration,
+      sourceIndex: frame.sourceIndex,
+      sourceName: frame.sourceName,
+      name: `frame_${String(index).padStart(4, "0")}`,
+      sourceSize: { width: target.width, height: target.height },
+      spriteSourceSize: { x: 0, y: 0, width: target.width, height: target.height }
+    });
+
+    if (index % 6 === 0 || index === frames.length - 1) {
+      report(`Processed ${index + 1} of ${frames.length} frames...`, (index + 1) / frames.length);
+      await waitForUiPaint();
+    }
+  }
+
+  if (settings.cropMode === "global") {
+    report("Cropping transparent bounds...", 0.96);
+    await waitForUiPaint();
+    processed = cropGlobal(processed);
+  } else if (settings.cropMode === "perFrame") {
+    report("Cropping transparent bounds...", 0.96);
+    await waitForUiPaint();
     processed = processed.map(cropSingleFrame);
   }
 
@@ -1334,16 +1475,26 @@ async function convertPixelArt() {
   const settings = getPixelSettings();
   revokePixelOutput();
   ui.pixelConvertBtn.disabled = true;
+  showConversionBackdrop("Converting Pixel Art", "Preparing conversion...", 0);
+  await waitForUiPaint();
 
   try {
     setPixelProgress("Converting images...");
+    updateConversionBackdrop("Converting images...", 8);
     const canvases = [];
     for (let index = 0; index < state.pixelFiles.length; index += 1) {
       const decoded = await decodeFirstImageFrame(state.pixelFiles[index]);
       canvases.push(processPixelArtCanvas(decoded.frame.canvas, settings));
-      if (index % 8 === 0) setPixelProgress(`Converted ${index + 1} image${index === 0 ? "" : "s"}...`);
+      if (index % 2 === 0 || index === state.pixelFiles.length - 1) {
+        const message = `Converted ${index + 1} of ${state.pixelFiles.length} image${state.pixelFiles.length === 1 ? "" : "s"}...`;
+        setPixelProgress(message);
+        updateConversionBackdrop(message, 8 + ((index + 1) / state.pixelFiles.length) * 72);
+        await waitForUiPaint();
+      }
     }
 
+    updateConversionBackdrop("Packing output...", 86);
+    await waitForUiPaint();
     const output = canvases.length === 1 ? canvases[0] : packPixelCanvases(canvases, settings);
     drawPixelOutput(output);
     preparePixelDownload(output);
@@ -1351,13 +1502,19 @@ async function convertPixelArt() {
       `<strong>${canvases.length}</strong> frame${canvases.length === 1 ? "" : "s"} converted.`,
       `Output: <strong>${output.width}x${output.height}</strong>.`,
       `Palette: ${["retrace", "adaptive", "kmeans"].includes(settings.paletteMode) ? `${settings.paletteSize} ${settings.paletteMode} colors` : settings.paletteMode}.`,
+      `Object Mosaic: ${settings.objectMosaic ? `${Math.round(settings.mosaicStrength * 100)}%` : "off"}.`,
+      `Human polish: ${Math.round(settings.polishStrength * 100)}%.`,
       "Workflow: shrink reference, redraw silhouette, reduce colors, define clusters, shade, highlight, cleanup."
     ].join(" ");
+    updateConversionBackdrop("Done.", 100);
     setPixelProgress("Done.");
+    await waitForUiPaint();
   } catch (error) {
     console.error(error);
+    updateConversionBackdrop(error.message || "Pixel conversion failed.", 100);
     setPixelProgress(error.message || "Pixel conversion failed.", true);
   } finally {
+    hideConversionBackdrop();
     ui.pixelConvertBtn.disabled = false;
   }
 }
@@ -1372,15 +1529,18 @@ function processPixelArtCanvas(sourceCanvas, settings) {
 
   const silhouette = redrawPixelSilhouette(reduced, settings);
   const silhouetteEdges = computeEdgeMap(silhouette.data, silhouette.width, silhouette.height);
-  const colorReduced = reducePixelArtColors(silhouette, settings, silhouetteEdges);
-  defineMajorPixelClusters(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
-  addSelectivePixelShading(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
-  addSelectivePixelHighlights(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouette.data, silhouetteEdges);
-  reinforcePixelOutlines(colorReduced.data, colorReduced.width, colorReduced.height, settings.outlineStrength, settings.alphaThreshold, silhouetteEdges);
+  const clusteredReference = settings.objectMosaic ? applyObjectMosaic(silhouette, settings, silhouetteEdges) : silhouette;
+  const clusteredEdges = computeEdgeMap(clusteredReference.data, clusteredReference.width, clusteredReference.height);
+  const colorReduced = reducePixelArtColors(clusteredReference, settings, clusteredEdges);
+  defineMajorPixelClusters(colorReduced.data, colorReduced.width, colorReduced.height, settings, clusteredEdges);
+  addSelectivePixelShading(colorReduced.data, colorReduced.width, colorReduced.height, settings, clusteredEdges);
+  addSelectivePixelHighlights(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouette.data, clusteredEdges);
+  reinforcePixelOutlines(colorReduced.data, colorReduced.width, colorReduced.height, settings.outlineStrength, settings.alphaThreshold, clusteredEdges);
   if (settings.paletteMode === "retrace") {
-    tracePixelSilhouette(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
+    tracePixelSilhouette(colorReduced.data, colorReduced.width, colorReduced.height, settings, clusteredEdges);
   }
-  cleanupNoisyPixelArtifacts(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouetteEdges);
+  applyHumanPixelPolish(colorReduced.data, colorReduced.width, colorReduced.height, settings, clusteredEdges);
+  cleanupNoisyPixelArtifacts(colorReduced.data, colorReduced.width, colorReduced.height, settings, clusteredEdges);
   bleedForegroundRgbIntoTransparentEdges(colorReduced.data, colorReduced.width, colorReduced.height, {
     rewriteSemiTransparent: true,
     fillFullyTransparent: true,
@@ -1435,14 +1595,108 @@ function reducePixelArtColors(imageData, settings, edgeMap) {
   return quantizePixelData(imageData, palette, settings, edgeMap);
 }
 
+function applyObjectMosaic(imageData, settings, edgeMap) {
+  const output = new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
+  const { width, height } = output;
+  const total = width * height;
+  const visited = new Uint8Array(total);
+  const stack = [];
+  const component = [];
+  const strength = settings.mosaicStrength;
+  const threshold = 620 + strength * 5400;
+  const minMass = Math.max(3, Math.round(3 + strength * 12));
+
+  for (let start = 0; start < total; start += 1) {
+    if (visited[start] || output.data[start * 4 + 3] <= settings.alphaThreshold) continue;
+
+    component.length = 0;
+    stack.length = 0;
+    visited[start] = 1;
+    stack.push(start);
+
+    while (stack.length) {
+      const pixel = stack.pop();
+      component.push(pixel);
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      const index = pixel * 4;
+      const neighbors = [];
+      if (x > 0) neighbors.push(pixel - 1);
+      if (x < width - 1) neighbors.push(pixel + 1);
+      if (y > 0) neighbors.push(pixel - width);
+      if (y < height - 1) neighbors.push(pixel + width);
+
+      for (const next of neighbors) {
+        if (visited[next] || output.data[next * 4 + 3] <= settings.alphaThreshold) continue;
+        if (edgeMap[pixel] > 0.82 && edgeMap[next] > 0.82) continue;
+        const nextIndex = next * 4;
+        const distance = colorDistanceRgb(
+          output.data[index],
+          output.data[index + 1],
+          output.data[index + 2],
+          output.data[nextIndex],
+          output.data[nextIndex + 1],
+          output.data[nextIndex + 2]
+        );
+        if (distance > threshold) continue;
+        visited[next] = 1;
+        stack.push(next);
+      }
+    }
+
+    if (component.length < minMass) continue;
+    const color = averageComponentColor(output.data, component);
+    const ramped = rampComponentColor(color, strength);
+    for (const pixel of component) {
+      const index = pixel * 4;
+      if (edgeMap[pixel] > 0.78 && component.length < minMass * 2) continue;
+      output.data[index] = Math.round(output.data[index] * (1 - strength) + ramped[0] * strength);
+      output.data[index + 1] = Math.round(output.data[index + 1] * (1 - strength) + ramped[1] * strength);
+      output.data[index + 2] = Math.round(output.data[index + 2] * (1 - strength) + ramped[2] * strength);
+    }
+  }
+
+  return output;
+}
+
+function averageComponentColor(data, component) {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (const pixel of component) {
+    const index = pixel * 4;
+    r += data[index];
+    g += data[index + 1];
+    b += data[index + 2];
+  }
+  return [
+    Math.round(r / component.length),
+    Math.round(g / component.length),
+    Math.round(b / component.length)
+  ];
+}
+
+function rampComponentColor(color, strength) {
+  const hsl = rgbToHsl(color[0], color[1], color[2]);
+  const rgb = hslToRgb(
+    Math.round(hsl.h * 14) / 14,
+    Math.round(hsl.s * 4) / 4,
+    snapToPixelRamp(hsl.l, 4, Math.max(0.65, strength))
+  );
+  return rgb;
+}
+
 function defineMajorPixelClusters(data, width, height, settings, edgeMap) {
   cleanupPixelClusters(data, width, height, settings.cleanupPasses, edgeMap, settings.alphaThreshold);
-  mergeTinyColorIslands(data, width, height, Math.max(2, settings.cleanupPasses + 2 + Math.round(settings.retraceStrength * 3)), edgeMap, settings.alphaThreshold);
+  collapseIntermediateTonePixels(data, width, height, settings, edgeMap);
+  massifyPixelClusters(data, width, height, settings, edgeMap);
+  mergeTinyColorIslands(data, width, height, Math.max(3, settings.cleanupPasses + 3 + Math.round(settings.retraceStrength * 5)), edgeMap, settings.alphaThreshold);
 }
 
 function addSelectivePixelShading(data, width, height, settings, edgeMap) {
   if (settings.paletteMode !== "retrace") return;
   celShadeRetracedPixels(data, width, height, settings, edgeMap);
+  collapseIntermediateTonePixels(data, width, height, settings, edgeMap);
 }
 
 function addSelectivePixelHighlights(data, width, height, settings, referenceData, edgeMap) {
@@ -1487,8 +1741,233 @@ function addSelectivePixelHighlights(data, width, height, settings, referenceDat
 
 function cleanupNoisyPixelArtifacts(data, width, height, settings, edgeMap) {
   cleanupPixelClusters(data, width, height, Math.max(1, settings.cleanupPasses), edgeMap, settings.alphaThreshold);
-  mergeTinyColorIslands(data, width, height, Math.max(2, settings.cleanupPasses + 1), edgeMap, settings.alphaThreshold);
+  massifyPixelClusters(data, width, height, settings, edgeMap);
+  collapseIntermediateTonePixels(data, width, height, settings, edgeMap);
+  mergeTinyColorIslands(data, width, height, Math.max(3, settings.cleanupPasses + 2), edgeMap, settings.alphaThreshold);
+  hardenPixelAlphaResidue(data, width, height, settings);
   removeLowAlphaNoise(data, settings.alphaThreshold);
+}
+
+function applyHumanPixelPolish(data, width, height, settings, edgeMap) {
+  const strength = settings.polishStrength || 0;
+  if (strength <= 0) return;
+
+  const passes = Math.max(1, Math.round(strength * 3));
+  for (let pass = 0; pass < passes; pass += 1) {
+    polishSilhouetteIntent(data, width, height, settings, edgeMap, strength);
+    removeAwkwardBoundaryTeeth(data, width, height, settings, edgeMap, strength);
+    regularizeIntentionalRamps(data, width, height, settings, edgeMap, strength);
+  }
+}
+
+function polishSilhouetteIntent(data, width, height, settings, edgeMap, strength) {
+  const copy = new Uint8ClampedArray(data);
+  const fillThreshold = strength > 0.55 ? 5 : 6;
+  const removeThreshold = strength > 0.65 ? 2 : 1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixel = y * width + x;
+      const index = pixel * 4;
+      const alpha = copy[index + 3];
+      const opaque8 = countOpaqueNeighbors(copy, width, height, x, y, settings.alphaThreshold);
+      const opaque4 = countCardinalOpaqueNeighbors(copy, width, height, x, y, settings.alphaThreshold);
+
+      if (alpha <= settings.alphaThreshold && opaque8 >= fillThreshold) {
+        const color = dominantNeighborRgbForPixel(copy, width, height, x, y, settings.alphaThreshold);
+        if (color) {
+          data[index] = color[0];
+          data[index + 1] = color[1];
+          data[index + 2] = color[2];
+          data[index + 3] = 255;
+        }
+        continue;
+      }
+
+      if (alpha <= settings.alphaThreshold) continue;
+      const protectedDetail = edgeMap[pixel] > 0.84 && isDarkerThanNeighbors(copy, width, height, x, y);
+      const diagonalCrumb = opaque8 <= 2 && opaque4 === 0;
+      const weakResidue = alpha < 160 && opaque8 <= removeThreshold;
+      if (!protectedDetail && (diagonalCrumb || weakResidue)) {
+        data[index + 3] = 0;
+      } else if (alpha > 160 || opaque8 >= 4) {
+        data[index + 3] = 255;
+      }
+    }
+  }
+}
+
+function removeAwkwardBoundaryTeeth(data, width, height, settings, edgeMap, strength) {
+  const copy = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixel = y * width + x;
+      const index = pixel * 4;
+      if (copy[index + 3] <= settings.alphaThreshold || !touchesTransparentPixel8(pixel, copy, width, height, settings.alphaThreshold)) continue;
+      if (edgeMap[pixel] > 0.82 && isDarkerThanNeighbors(copy, width, height, x, y)) continue;
+
+      const same = sameColorNeighborCount(copy, width, height, x, y, settings.alphaThreshold);
+      const opaque8 = countOpaqueNeighbors(copy, width, height, x, y, settings.alphaThreshold);
+      const opaque4 = countCardinalOpaqueNeighbors(copy, width, height, x, y, settings.alphaThreshold);
+      if (opaque8 <= 2 && opaque4 <= 1 && strength > 0.45) {
+        data[index + 3] = 0;
+        continue;
+      }
+
+      const replacement = dominantNeighborRgbForPixel(copy, width, height, x, y, settings.alphaThreshold);
+      if (replacement && same <= 1 && opaque8 >= 4) {
+        data[index] = Math.round(copy[index] * (1 - strength) + replacement[0] * strength);
+        data[index + 1] = Math.round(copy[index + 1] * (1 - strength) + replacement[1] * strength);
+        data[index + 2] = Math.round(copy[index + 2] * (1 - strength) + replacement[2] * strength);
+      }
+    }
+  }
+}
+
+function regularizeIntentionalRamps(data, width, height, settings, edgeMap, strength) {
+  const copy = new Uint8ClampedArray(data);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixel = y * width + x;
+      const index = pixel * 4;
+      if (copy[index + 3] <= settings.alphaThreshold || isProtectedPixelDetail(copy, width, height, x, y, edgeMap, settings.alphaThreshold)) continue;
+
+      const same = sameColorNeighborCount(copy, width, height, x, y, settings.alphaThreshold);
+      const aligned = hasRampAlignment(copy, width, height, x, y, settings.alphaThreshold);
+      if (same >= 2 && aligned) continue;
+
+      const currentLum = luminance(copy[index], copy[index + 1], copy[index + 2]);
+      let low = 0;
+      let high = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const next = ((y + oy) * width + x + ox) * 4;
+          if (copy[next + 3] <= settings.alphaThreshold) continue;
+          const nextLum = luminance(copy[next], copy[next + 1], copy[next + 2]);
+          if (nextLum < currentLum - 12) low += 1;
+          if (nextLum > currentLum + 12) high += 1;
+        }
+      }
+
+      if (same <= 1 && low >= 2 && high >= 2) {
+        const replacement = dominantNeighborRgbForPixel(copy, width, height, x, y, settings.alphaThreshold);
+        if (!replacement) continue;
+        data[index] = replacement[0];
+        data[index + 1] = replacement[1];
+        data[index + 2] = replacement[2];
+      }
+    }
+  }
+}
+
+function collapseIntermediateTonePixels(data, width, height, settings, edgeMap) {
+  if (settings.retraceStrength <= 0) return;
+  const copy = new Uint8ClampedArray(data);
+  const supportNeeded = settings.retraceStrength > 0.75 ? 3 : 4;
+
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const pixel = y * width + x;
+      const index = pixel * 4;
+      if (copy[index + 3] <= settings.alphaThreshold || isProtectedPixelDetail(copy, width, height, x, y, edgeMap, settings.alphaThreshold)) continue;
+
+      const currentKey = rgbKey(copy, index);
+      const currentLum = luminance(copy[index], copy[index + 1], copy[index + 2]);
+      const counts = new Map();
+      let same = 0;
+      let lowerLum = 0;
+      let higherLum = 0;
+
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const nextPixel = (y + oy) * width + x + ox;
+          const next = nextPixel * 4;
+          if (copy[next + 3] <= settings.alphaThreshold) continue;
+          const key = rgbKey(copy, next);
+          const nextLum = luminance(copy[next], copy[next + 1], copy[next + 2]);
+          if (key === currentKey) same += 1;
+          if (nextLum < currentLum - 10) lowerLum += 1;
+          if (nextLum > currentLum + 10) higherLum += 1;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+      }
+
+      const winner = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+      const looksLikeTransition = lowerLum >= 2 && higherLum >= 2;
+      if (!winner || winner[0] === currentKey) continue;
+      if (winner[1] >= supportNeeded || (looksLikeTransition && same <= 2 && winner[1] >= 2)) {
+        const color = winner[0].split(",").map(Number);
+        data[index] = color[0];
+        data[index + 1] = color[1];
+        data[index + 2] = color[2];
+      }
+    }
+  }
+}
+
+function massifyPixelClusters(data, width, height, settings, edgeMap) {
+  const passes = Math.max(1, Math.round(settings.retraceStrength * 3));
+  for (let pass = 0; pass < passes; pass += 1) {
+    const copy = new Uint8ClampedArray(data);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const pixel = y * width + x;
+        const index = pixel * 4;
+        if (copy[index + 3] <= settings.alphaThreshold || isProtectedPixelDetail(copy, width, height, x, y, edgeMap, settings.alphaThreshold)) continue;
+
+        const currentKey = rgbKey(copy, index);
+        const counts = new Map();
+        let same = 0;
+        for (let oy = -1; oy <= 1; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            if (ox === 0 && oy === 0) continue;
+            const next = ((y + oy) * width + x + ox) * 4;
+            if (copy[next + 3] <= settings.alphaThreshold) continue;
+            const key = rgbKey(copy, next);
+            if (key === currentKey) same += 1;
+            counts.set(key, (counts.get(key) || 0) + 1);
+          }
+        }
+
+        const winner = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+        if (!winner || winner[0] === currentKey) continue;
+        if (winner[1] >= 4 || (same <= 2 && winner[1] >= 3)) {
+          const color = winner[0].split(",").map(Number);
+          data[index] = color[0];
+          data[index + 1] = color[1];
+          data[index + 2] = color[2];
+        }
+      }
+    }
+  }
+}
+
+function hardenPixelAlphaResidue(data, width, height, settings) {
+  const strength = settings.retraceStrength || 0;
+  if (strength <= 0) return;
+  const low = Math.max(settings.alphaThreshold, 72 + strength * 34);
+  const high = 186 - strength * 42;
+
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const index = pixel * 4;
+    const alpha = data[index + 3];
+    if (alpha <= settings.alphaThreshold || alpha < low) {
+      data[index + 3] = 0;
+    } else if (alpha > high) {
+      data[index + 3] = 255;
+    } else {
+      data[index + 3] = Math.round(alpha * (1 - strength * 0.55) + (alpha >= 128 ? 255 : 0) * strength * 0.55);
+    }
+  }
+}
+
+function isProtectedPixelDetail(data, width, height, x, y, edgeMap, alphaThreshold) {
+  const pixel = y * width + x;
+  const index = pixel * 4;
+  if (touchesTransparentPixel8(pixel, data, width, height, alphaThreshold)) return true;
+  return edgeMap[pixel] > 0.74 && isDarkerThanNeighbors(data, width, height, x, y);
 }
 
 function computeEdgeMap(data, width, height) {
@@ -1670,10 +2149,10 @@ function retracePixelForms(imageData, settings) {
   const output = new ImageData(new Uint8ClampedArray(imageData.data), imageData.width, imageData.height);
   if (strength <= 0) return output;
 
-  const hueSteps = Math.round(48 - strength * 24);
-  const saturationSteps = Math.round(6 - strength * 2);
-  const lightnessSteps = Math.round(7 - strength * 3);
-  const alphaHarden = Math.min(0.72, strength * 0.62);
+  const hueSteps = Math.max(12, Math.round(36 - strength * 20));
+  const saturationSteps = Math.max(3, Math.round(5 - strength * 2));
+  const lightnessSteps = Math.max(3, Math.round(5 - strength * 2.4));
+  const alphaHarden = Math.min(0.86, strength * 0.76);
 
   for (let index = 0; index < output.data.length; index += 4) {
     const alpha = output.data[index + 3];
@@ -1685,7 +2164,7 @@ function retracePixelForms(imageData, settings) {
     const hsl = rgbToHsl(output.data[index], output.data[index + 1], output.data[index + 2]);
     const hue = Math.round(hsl.h * hueSteps) / hueSteps;
     const saturation = Math.round(hsl.s * saturationSteps) / saturationSteps;
-    const lightness = Math.round(hsl.l * lightnessSteps) / lightnessSteps;
+    const lightness = snapToPixelRamp(hsl.l, lightnessSteps, strength);
     const rgb = hslToRgb(hue, saturation, lightness);
 
     output.data[index] = rgb[0];
@@ -1955,12 +2434,30 @@ function hslToRgb(h, s, l) {
   ];
 }
 
+function snapToPixelRamp(value, steps, strength) {
+  const ramp = steps <= 3
+    ? [0.18, 0.42, 0.72]
+    : steps <= 4
+      ? [0.16, 0.34, 0.56, 0.78]
+      : [0.12, 0.28, 0.44, 0.62, 0.82];
+  let nearest = ramp[0];
+  let distance = Math.abs(value - nearest);
+  for (const stop of ramp) {
+    const nextDistance = Math.abs(value - stop);
+    if (nextDistance < distance) {
+      nearest = stop;
+      distance = nextDistance;
+    }
+  }
+  return value * (1 - strength) + nearest * strength;
+}
+
 function celShadeRetracedPixels(data, width, height, settings, edgeMap) {
   const strength = settings.retraceStrength || 0;
   if (strength <= 0) return;
 
-  const shadeBands = Math.round(6 - strength * 3);
-  const hueBands = Math.round(20 - strength * 8);
+  const shadeBands = Math.max(3, Math.round(5 - strength * 2.2));
+  const hueBands = Math.max(10, Math.round(18 - strength * 7));
   const groups = new Map();
 
   for (let pixel = 0; pixel < width * height; pixel += 1) {
@@ -2055,6 +2552,54 @@ function countOpaqueNeighbors(data, width, height, x, y, alphaThreshold) {
     }
   }
   return count;
+}
+
+function countCardinalOpaqueNeighbors(data, width, height, x, y, alphaThreshold) {
+  let count = 0;
+  const offsets = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  for (const [ox, oy] of offsets) {
+    const nx = x + ox;
+    const ny = y + oy;
+    if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+    if (data[(ny * width + nx) * 4 + 3] > alphaThreshold) count += 1;
+  }
+  return count;
+}
+
+function sameColorNeighborCount(data, width, height, x, y, alphaThreshold) {
+  const index = (y * width + x) * 4;
+  const key = rgbKey(data, index);
+  let count = 0;
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const next = (ny * width + nx) * 4;
+      if (data[next + 3] > alphaThreshold && rgbKey(data, next) === key) count += 1;
+    }
+  }
+  return count;
+}
+
+function hasRampAlignment(data, width, height, x, y, alphaThreshold) {
+  const index = (y * width + x) * 4;
+  const key = rgbKey(data, index);
+  const pairs = [
+    [[-1, 0], [1, 0]],
+    [[0, -1], [0, 1]],
+    [[-1, -1], [1, 1]],
+    [[1, -1], [-1, 1]]
+  ];
+
+  return pairs.some((pair) => pair.every(([ox, oy]) => {
+    const nx = x + ox;
+    const ny = y + oy;
+    if (nx < 0 || ny < 0 || nx >= width || ny >= height) return false;
+    const next = (ny * width + nx) * 4;
+    return data[next + 3] > alphaThreshold && rgbKey(data, next) === key;
+  }));
 }
 
 function dominantNeighborRgbForPixel(data, width, height, x, y, alphaThreshold) {
@@ -2191,14 +2736,14 @@ function mergeTinyColorIslands(data, width, height, minArea, edgeMap, alphaThres
     stack.length = 0;
     const startIndex = start * 4;
     const key = rgbKey(data, startIndex);
-    let protectedEdge = false;
+    let maxEdge = 0;
     visited[start] = 1;
     stack.push(start);
 
     while (stack.length) {
       const pixel = stack.pop();
       component.push(pixel);
-      protectedEdge = protectedEdge || edgeMap[pixel] > 0.62;
+      maxEdge = Math.max(maxEdge, edgeMap[pixel]);
       const x = pixel % width;
       const y = Math.floor(pixel / width);
       const neighbors = [];
@@ -2214,7 +2759,7 @@ function mergeTinyColorIslands(data, width, height, minArea, edgeMap, alphaThres
       }
     }
 
-    if (component.length > minArea || protectedEdge) continue;
+    if (component.length > minArea || (maxEdge > 0.82 && component.length > Math.max(2, Math.floor(minArea / 2)))) continue;
     const replacement = dominantNeighborColor(data, width, height, component, key, alphaThreshold);
     if (!replacement) continue;
     for (const pixel of component) {
@@ -2549,7 +3094,9 @@ ui.tabButtons.forEach((button) => {
   });
 });
 
-ui.pixelPaletteMode.addEventListener("change", syncPixelControls);
+[ui.pixelPaletteMode, ui.pixelObjectMosaic].forEach((control) => {
+  control.addEventListener("change", syncPixelControls);
+});
 
 [
   ui.frameWidth,
@@ -2610,5 +3157,6 @@ bindDropZone(ui.dropZone, onFiles);
 bindDropZone(ui.backgroundDropZone, onFiles);
 bindDropZone(ui.pixelDropZone, onPixelFiles);
 
+setupRangeTooltips();
 syncConditionalControls();
 updateCodecStatus();

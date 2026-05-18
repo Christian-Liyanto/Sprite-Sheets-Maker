@@ -40,7 +40,7 @@
               </label>
               <label id="sampleFpsField">
                 <span>Video sample FPS</span>
-                <input id="sampleFps" type="number" min="1" max="120" step="1" value="24">
+                <input id="sampleFps" type="range" min="1" max="120" step="1" value="24">
               </label>
               <label class="check-row">
                 <input id="useSourceFrameCount" type="checkbox">
@@ -48,7 +48,7 @@
               </label>
               <label id="maxFramesField">
                 <span>Max frames</span>
-                <input id="maxFrames" type="number" min="1" max="2000" step="1" value="300">
+                <input id="maxFrames" type="range" min="1" max="2000" step="1" value="300">
               </label>
               <label class="check-row">
                 <input id="removeDuplicates" type="checkbox" checked>
@@ -56,7 +56,7 @@
               </label>
               <label id="duplicateThresholdField">
                 <span>Duplicate threshold (%)</span>
-                <input id="duplicateThreshold" type="number" min="0" max="100" step="0.1" value="3.1">
+                <input id="duplicateThreshold" type="range" min="0" max="100" step="0.1" value="3.1">
               </label>
             </div>
 
@@ -73,16 +73,16 @@
               <div class="split" id="customSizeFields">
                 <label>
                   <span>Width</span>
-                  <input id="frameWidth" type="number" min="1" value="32">
+                  <input id="frameWidth" type="number" min="1" max="8192" step="1" value="32">
                 </label>
                 <label>
                   <span>Height</span>
-                  <input id="frameHeight" type="number" min="1" value="32">
+                  <input id="frameHeight" type="number" min="1" max="8192" step="1" value="32">
                 </label>
               </div>
               <label id="multiplierField">
                 <span>Multiplier</span>
-                <input id="multiplier" type="number" min="1" max="16" step="1" value="4">
+                <input id="multiplier" type="range" min="1" max="16" step="1" value="4">
               </label>
               <label id="fitModeField">
                 <span>Fit</span>
@@ -98,20 +98,20 @@
               <h2>Sheet</h2>
               <label>
                 <span>Columns</span>
-                <input id="columns" type="number" min="0" value="0">
+                <input id="columns" type="range" min="0" max="2000" step="1" value="0">
               </label>
               <label>
                 <span>Padding</span>
-                <input id="padding" type="number" min="0" value="2">
+                <input id="padding" type="range" min="0" max="256" step="1" value="2">
               </label>
               <div class="split">
                 <label>
                   <span>Pivot X</span>
-                  <input id="pivotX" type="number" min="0" max="1" step="0.01" value="0.5">
+                  <input id="pivotX" type="range" min="0" max="1" step="0.01" value="0.5">
                 </label>
                 <label>
                   <span>Pivot Y</span>
-                  <input id="pivotY" type="number" min="0" max="1" step="0.01" value="0.5">
+                  <input id="pivotY" type="range" min="0" max="1" step="0.01" value="0.5">
                 </label>
               </div>
               <label>
@@ -171,11 +171,11 @@
                 </label>
                 <label id="keyToleranceField">
                   <span>Tolerance (%)</span>
-                  <input id="keyTolerance" type="number" min="0" max="100" step="0.1" value="9.5">
+                  <input id="keyTolerance" type="range" min="0" max="100" step="0.1" value="9.5">
                 </label>
                 <label id="alphaNoiseField">
                   <span>Alpha noise cleanup (%)</span>
-                  <input id="alphaNoise" type="number" min="0" max="100" step="0.1" value="1">
+                  <input id="alphaNoise" type="range" min="0" max="100" step="0.1" value="1">
                 </label>
                 <label id="matteRefineField">
                   <span>Matte refinement</span>
@@ -263,7 +263,7 @@
                 </div>
                 <label>
                   <span>Upscale</span>
-                  <input id="pixelUpscale" type="number" min="1" max="12" step="1" value="4">
+                  <input id="pixelUpscale" type="range" min="1" max="12" step="1" value="4">
                 </label>
               </div>
 
@@ -283,31 +283,43 @@
                 </label>
                 <label id="pixelPaletteSizeField">
                   <span>Palette colors</span>
-                  <input id="pixelPaletteSize" type="number" min="16" max="128" step="1" value="24">
+                  <input id="pixelPaletteSize" type="range" min="16" max="128" step="1" value="18">
                 </label>
               </div>
 
               <div class="control-group">
                 <h2>Redraw Passes</h2>
+                <label class="check-row">
+                  <input id="pixelObjectMosaic" type="checkbox">
+                  <span>Object Mosaic clustering</span>
+                </label>
+                <label id="pixelMosaicStrengthField">
+                  <span>Mosaic strength (%)</span>
+                  <input id="pixelMosaicStrength" type="range" min="0" max="100" step="1" value="55">
+                </label>
                 <label>
                   <span>Retrace strength (%)</span>
-                  <input id="pixelRetraceStrength" type="number" min="0" max="100" step="1" value="82">
+                  <input id="pixelRetraceStrength" type="range" min="0" max="100" step="1" value="88">
                 </label>
                 <label>
                   <span>Edge preservation (%)</span>
-                  <input id="pixelEdgeStrength" type="number" min="0" max="100" step="1" value="85">
+                  <input id="pixelEdgeStrength" type="range" min="0" max="100" step="1" value="76">
                 </label>
                 <label>
                   <span>Cluster cleanup</span>
-                  <input id="pixelCleanupPasses" type="number" min="0" max="4" step="1" value="3">
+                  <input id="pixelCleanupPasses" type="range" min="0" max="8" step="1" value="5">
                 </label>
                 <label>
                   <span>Outline reinforcement (%)</span>
-                  <input id="pixelOutlineStrength" type="number" min="0" max="100" step="1" value="70">
+                  <input id="pixelOutlineStrength" type="range" min="0" max="100" step="1" value="76">
                 </label>
                 <label>
                   <span>Alpha cleanup (%)</span>
-                  <input id="pixelAlphaThreshold" type="number" min="0" max="100" step="0.1" value="1">
+                  <input id="pixelAlphaThreshold" type="range" min="0" max="100" step="0.1" value="2">
+                </label>
+                <label>
+                  <span>Human polish (%)</span>
+                  <input id="pixelPolishStrength" type="range" min="0" max="100" step="1" value="62">
                 </label>
               </div>
 
@@ -323,7 +335,7 @@
                 </label>
                 <label>
                   <span>Strength (%)</span>
-                  <input id="pixelDitherStrength" type="number" min="0" max="100" step="1" value="35">
+                  <input id="pixelDitherStrength" type="range" min="0" max="100" step="1" value="35">
                 </label>
               </div>
 
@@ -331,11 +343,11 @@
                 <h2>Sheet</h2>
                 <label>
                   <span>Columns</span>
-                  <input id="pixelColumns" type="number" min="0" max="256" step="1" value="0">
+                  <input id="pixelColumns" type="range" min="0" max="256" step="1" value="0">
                 </label>
                 <label>
                   <span>Padding</span>
-                  <input id="pixelPadding" type="number" min="0" max="64" step="1" value="2">
+                  <input id="pixelPadding" type="range" min="0" max="64" step="1" value="2">
                 </label>
               </div>
               <div class="progress" id="pixelProgress">Load image files to begin.</div>
@@ -361,6 +373,16 @@
         </section>
       </section>
     </main>
+    <div class="conversion-backdrop" id="conversionBackdrop" hidden>
+      <div class="conversion-dialog" role="status" aria-live="polite">
+        <h2 id="conversionTitle">Converting</h2>
+        <p id="conversionMessage">Preparing...</p>
+        <div class="conversion-progress-track">
+          <div class="conversion-progress-bar" id="conversionProgressBar"></div>
+        </div>
+        <div class="conversion-progress-value" id="conversionProgressValue">0%</div>
+      </div>
+    </div>
     <script type="module" src="src/app.js"></script>
   </body>
 </html>
