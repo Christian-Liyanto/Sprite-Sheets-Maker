@@ -1401,17 +1401,13 @@ function packFrames(frames, decoded, settings) {
   const padding = settings.padding;
   const maxWidth = Math.max(...frames.map((frame) => frame.canvas.width));
   const maxHeight = Math.max(...frames.map((frame) => frame.canvas.height));
-  const columns = settings.columns > 0
-    ? Math.min(settings.columns, frames.length)
-    : Math.ceil(Math.sqrt(frames.length * (maxHeight / Math.max(1, maxWidth))));
-  const rows = Math.ceil(frames.length / columns);
-  const width = columns * maxWidth + (columns + 1) * padding;
-  const height = rows * maxHeight + (rows + 1) * padding;
+  const layout = squareSheetLayout(frames.length, maxWidth, maxHeight, padding, settings.columns);
+  const { columns, rows } = layout;
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = layout.width;
+  canvas.height = layout.height;
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, width, height);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const packedFrames = frames.map((frame, index) => {
     const column = index % columns;
@@ -1452,6 +1448,17 @@ function packFrames(frames, decoded, settings) {
   };
 }
 
+function squareSheetLayout(count, cellWidth, cellHeight, padding, requestedColumns) {
+  const columns = requestedColumns > 0
+    ? Math.min(requestedColumns, count)
+    : Math.ceil(Math.sqrt(count * (cellHeight / Math.max(1, cellWidth))));
+  const rows = Math.ceil(count / columns);
+  const gridWidth = columns * cellWidth + (columns + 1) * padding;
+  const gridHeight = rows * cellHeight + (rows + 1) * padding;
+  const side = Math.max(gridWidth, gridHeight);
+  return { columns, rows, width: side, height: side };
+}
+
 function drawFrameWithOptionalExtrusion(ctx, canvas, x, y, extrusion) {
   const width = canvas.width;
   const height = canvas.height;
@@ -1479,16 +1486,40 @@ async function convertPixelArt() {
   await waitForUiPaint();
 
   try {
-    setPixelProgress("Converting images...");
-    updateConversionBackdrop("Converting images...", 8);
-    const canvases = [];
+    setPixelProgress("Decoding images...");
+    updateConversionBackdrop("Decoding images...", 8);
+    const decodedCanvases = [];
     for (let index = 0; index < state.pixelFiles.length; index += 1) {
       const decoded = await decodeFirstImageFrame(state.pixelFiles[index]);
-      canvases.push(processPixelArtCanvas(decoded.frame.canvas, settings));
+      decodedCanvases.push(decoded.frame.canvas);
       if (index % 2 === 0 || index === state.pixelFiles.length - 1) {
-        const message = `Converted ${index + 1} of ${state.pixelFiles.length} image${state.pixelFiles.length === 1 ? "" : "s"}...`;
+        const message = `Decoded ${index + 1} of ${state.pixelFiles.length} image${state.pixelFiles.length === 1 ? "" : "s"}...`;
         setPixelProgress(message);
-        updateConversionBackdrop(message, 8 + ((index + 1) / state.pixelFiles.length) * 72);
+        updateConversionBackdrop(message, 8 + ((index + 1) / state.pixelFiles.length) * 18);
+        await waitForUiPaint();
+      }
+    }
+
+    const sourceCanvases = stabilizePixelSourceSequence(decodedCanvases, settings.alphaThreshold);
+    const preparedFrames = [];
+    for (let index = 0; index < sourceCanvases.length; index += 1) {
+      preparedFrames.push(preparePixelArtFrame(sourceCanvases[index], settings));
+      if (index % 2 === 0 || index === sourceCanvases.length - 1) {
+        const message = `Prepared ${index + 1} of ${sourceCanvases.length} frame${sourceCanvases.length === 1 ? "" : "s"}...`;
+        setPixelProgress(message);
+        updateConversionBackdrop(message, 26 + ((index + 1) / sourceCanvases.length) * 28);
+        await waitForUiPaint();
+      }
+    }
+
+    const sharedPalette = buildPixelPaletteForFrames(preparedFrames, settings);
+    const canvases = [];
+    for (let index = 0; index < preparedFrames.length; index += 1) {
+      canvases.push(finishPixelArtFrame(preparedFrames[index], settings, sharedPalette));
+      if (index % 2 === 0 || index === preparedFrames.length - 1) {
+        const message = `Converted ${index + 1} of ${preparedFrames.length} frame${preparedFrames.length === 1 ? "" : "s"}...`;
+        setPixelProgress(message);
+        updateConversionBackdrop(message, 54 + ((index + 1) / preparedFrames.length) * 28);
         await waitForUiPaint();
       }
     }
@@ -1520,6 +1551,12 @@ async function convertPixelArt() {
 }
 
 function processPixelArtCanvas(sourceCanvas, settings) {
+  const prepared = preparePixelArtFrame(sourceCanvas, settings);
+  const palette = buildPixelPaletteForFrames([prepared], settings);
+  return finishPixelArtFrame(prepared, settings, palette);
+}
+
+function preparePixelArtFrame(sourceCanvas, settings) {
   const sourceCtx = sourceCanvas.getContext("2d");
   const source = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
   const sourceEdges = computeEdgeMap(source.data, source.width, source.height);
@@ -1531,7 +1568,12 @@ function processPixelArtCanvas(sourceCanvas, settings) {
   const silhouetteEdges = computeEdgeMap(silhouette.data, silhouette.width, silhouette.height);
   const clusteredReference = settings.objectMosaic ? applyObjectMosaic(silhouette, settings, silhouetteEdges) : silhouette;
   const clusteredEdges = computeEdgeMap(clusteredReference.data, clusteredReference.width, clusteredReference.height);
-  const colorReduced = reducePixelArtColors(clusteredReference, settings, clusteredEdges);
+  return { clusteredReference, clusteredEdges, silhouette };
+}
+
+function finishPixelArtFrame(preparedFrame, settings, palette) {
+  const { clusteredReference, clusteredEdges, silhouette } = preparedFrame;
+  const colorReduced = reducePixelArtColors(clusteredReference, settings, clusteredEdges, palette);
   defineMajorPixelClusters(colorReduced.data, colorReduced.width, colorReduced.height, settings, clusteredEdges);
   addSelectivePixelShading(colorReduced.data, colorReduced.width, colorReduced.height, settings, clusteredEdges);
   addSelectivePixelHighlights(colorReduced.data, colorReduced.width, colorReduced.height, settings, silhouette.data, clusteredEdges);
@@ -1548,6 +1590,86 @@ function processPixelArtCanvas(sourceCanvas, settings) {
   });
 
   return upscaleImageDataNearest(colorReduced, settings.upscale);
+}
+
+function buildPixelPaletteForFrames(preparedFrames, settings) {
+  if (preparedFrames.length === 1) {
+    return buildPixelPalette(preparedFrames[0].clusteredReference.data, settings);
+  }
+
+  const fixed = fixedPalette(settings.paletteMode);
+  if (fixed) return fixed;
+
+  const pixels = [];
+  for (const frame of preparedFrames) {
+    const data = frame.clusteredReference.data;
+    for (let index = 0; index < data.length; index += 4) {
+      if (data[index + 3] <= settings.alphaThreshold) continue;
+      pixels.push([data[index], data[index + 1], data[index + 2]]);
+    }
+  }
+
+  if (!pixels.length) return [[0, 0, 0]];
+  if (settings.paletteMode === "retrace") return retracePalette(pixels, settings.paletteSize);
+  if (settings.paletteMode === "kmeans") return kMeansPalette(pixels, settings.paletteSize);
+  return medianCutPalette(pixels, settings.paletteSize);
+}
+
+function stabilizePixelSourceSequence(canvases, alphaThreshold) {
+  if (canvases.length <= 1) return canvases;
+  const sameSize = canvases.every((canvas) => canvas.width === canvases[0].width && canvas.height === canvases[0].height);
+  if (sameSize) return canvases;
+
+  const bounds = canvases.map((canvas) => alphaBoundsForCanvas(canvas, alphaThreshold));
+  const visibleBounds = bounds.filter(Boolean);
+  if (!visibleBounds.length) return canvases;
+
+  const margin = 2;
+  const maxWidth = Math.max(...visibleBounds.map((bounds) => bounds.width));
+  const maxHeight = Math.max(...visibleBounds.map((bounds) => bounds.height));
+  const targetWidth = maxWidth + margin * 2;
+  const targetHeight = maxHeight + margin * 2;
+
+  return canvases.map((canvas, index) => {
+    const boundsForFrame = bounds[index];
+    if (!boundsForFrame) return canvas;
+
+    const output = document.createElement("canvas");
+    output.width = targetWidth;
+    output.height = targetHeight;
+    const ctx = output.getContext("2d");
+    const drawX = Math.round(targetWidth / 2 - (boundsForFrame.x + boundsForFrame.width / 2));
+    const drawY = Math.round(targetHeight - margin - (boundsForFrame.y + boundsForFrame.height));
+    ctx.drawImage(canvas, drawX, drawY);
+    return output;
+  });
+}
+
+function alphaBoundsForCanvas(canvas, alphaThreshold) {
+  const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const alpha = data[(y * canvas.width + x) * 4 + 3];
+      if (alpha <= alphaThreshold) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1
+  };
 }
 
 function shrinkReferenceToPixelGrid(data, sourceWidth, sourceHeight, targetWidth, targetHeight, edgeMap, settings) {
@@ -1590,8 +1712,8 @@ function redrawPixelSilhouette(imageData, settings) {
   return output;
 }
 
-function reducePixelArtColors(imageData, settings, edgeMap) {
-  const palette = buildPixelPalette(imageData.data, settings);
+function reducePixelArtColors(imageData, settings, edgeMap, sharedPalette = null) {
+  const palette = sharedPalette || buildPixelPalette(imageData.data, settings);
   return quantizePixelData(imageData, palette, settings, edgeMap);
 }
 
@@ -2855,11 +2977,11 @@ function packPixelCanvases(canvases, settings) {
   const padding = settings.padding;
   const maxWidth = Math.max(...canvases.map((canvas) => canvas.width));
   const maxHeight = Math.max(...canvases.map((canvas) => canvas.height));
-  const columns = settings.columns > 0 ? Math.min(settings.columns, canvases.length) : Math.ceil(Math.sqrt(canvases.length));
-  const rows = Math.ceil(canvases.length / columns);
+  const layout = squareSheetLayout(canvases.length, maxWidth, maxHeight, padding, settings.columns);
+  const { columns } = layout;
   const output = document.createElement("canvas");
-  output.width = columns * maxWidth + (columns + 1) * padding;
-  output.height = rows * maxHeight + (rows + 1) * padding;
+  output.width = layout.width;
+  output.height = layout.height;
   const ctx = output.getContext("2d");
   ctx.imageSmoothingEnabled = false;
 
